@@ -1,0 +1,51 @@
+# UNACCEPTED integration template. Rendering does not approve build/publication.
+class Koma < Formula
+  desc "Wayland tiling compositor with explicit desktop automation interfaces"
+  homepage "https://github.com/komawm/koma"
+  url "https://github.com/komawm/koma/archive/@SOURCE_COMMIT@.tar.gz"
+  version "@VERSION@"
+  sha256 "@SOURCE_SHA256@"
+  license "GPL-3.0-or-later"
+
+  depends_on :linux
+  depends_on "pkgconf" => :build
+  depends_on "rust" => :build
+  depends_on "dbus"
+  depends_on "fontconfig"
+  depends_on "libdisplay-info"
+  depends_on "libdrm"
+  depends_on "libinput"
+  depends_on "libxkbcommon"
+  depends_on "mesa"
+  depends_on "seatd"
+  depends_on "systemd"
+  depends_on "wayland"
+
+  def install
+    raise "Release build requires a reviewed, committed Cargo.lock" unless File.exist?("Cargo.lock")
+
+    system "cargo", "build", "--release", "--locked",
+           "--package", "koma",
+           "--package", "komactl",
+           "--package", "koma-mcp",
+           "--package", "koma-overview"
+
+    bin.install "target/release/koma"
+    bin.install "target/release/komactl"
+    bin.install "target/release/koma-mcp"
+    bin.install "target/release/koma-overview"
+    bin.install "resources/koma-session"
+    (share/"wayland-sessions").install "resources/koma.desktop"
+    (lib/"systemd/user").install "resources/koma.service"
+    (lib/"systemd/user").install "resources/koma-shutdown.target"
+    (share/"xdg-desktop-portal").install "resources/koma-portals.conf"
+    (doc/"examples").install "resources/greetd-config.toml", "examples/init.lua"
+    (share/"licenses/koma").install "LICENSE"
+  end
+
+  test do
+    assert_match "koma", shell_output("#{bin}/koma --version")
+    assert_match "komactl", shell_output("#{bin}/komactl --version")
+    assert_match "name", shell_output("#{bin}/koma-mcp --print-tools")
+  end
+end

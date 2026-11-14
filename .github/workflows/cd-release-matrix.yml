@@ -1,0 +1,649 @@
+name: cd-release-matrix
+
+# Manually dispatched development-prerelease CD matrix across target distributions.
+# Building never publishes. Publishing requires publish=true, the protected
+# `release` environment, and the PRODUCT_RELEASE_TOKEN environment secret.
+
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: Product repository under komawm
+        type: choice
+        options:
+          - koma
+        required: true
+        default: koma
+      tag:
+        description: Existing product release tag, for example v0.0.1
+        type: string
+        required: true
+      channel:
+        description: Distribution channel scope to build or validate
+        type: choice
+        options:
+          - linux
+          - all
+          - debian
+          - rpm
+          - alpine
+          - nix
+          - freebsd
+          - homebrew
+        required: true
+        default: linux
+      publish:
+        description: Upload built packages and manifests to the existing product release
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-release-matrix-${{ inputs.product }}-${{ inputs.tag }}-${{ inputs.channel }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve immutable source revision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      commit: ${{ steps.resolve.outputs.commit }}
+      source_sha256: ${{ steps.resolve.outputs.source_sha256 }}
+    env:
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate packaging metadata and resolve tag archive
+        id: resolve
+        run: |
+          set -euo pipefail
+          case "$PRODUCT" in
+            koma) ;;
+            *) echo "::error::Unsupported product: $PRODUCT"; exit 1 ;;
+          esac
+          if [[ ! "$TAG" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag must match v0.MINOR.PATCH for development builds"
+            exit 1
+          fi
+          version="${TAG#v}"
+          python3 scripts/verify.py
+          commit="$(bash scripts/resolve-tag.sh "$PRODUCT" "$TAG")"
+          source_sha256="$(bash scripts/download-source.sh "$PRODUCT" "$commit" /tmp/source.tar.gz)"
+          {
+            echo "version=$version"
+            echo "commit=$commit"
+            echo "source_sha256=$source_sha256"
+          } >> "$GITHUB_OUTPUT"
+
+  build-debian:
+    name: Build Debian/Ubuntu (.deb)
+    if: ${{ inputs.channel == 'linux' || inputs.channel == 'all' || inputs.channel == 'debian' }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+      WORK_DIR: /tmp/deb-work
+      OUT_DIR: /tmp/deb-out
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Debian build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            debhelper dpkg-dev pkgconf libudev-dev libinput-dev libseat-dev \
+            libgbm-dev libegl1-mesa-dev libgles2-mesa-dev libwayland-dev \
+            libxkbcommon-dev libdbus-1-dev libfontconfig1-dev libdisplay-info-dev
+
+      - name: Unpack verified source and resolve Rust channel
+        id: source
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK_DIR" "$OUT_DIR"
+          archive="$WORK_DIR/${PRODUCT}-${SOURCE_COMMIT}.tar.gz"
+          bash scripts/download-source.sh "$PRODUCT" "$SOURCE_COMMIT" "$archive" "$SOURCE_SHA256" >/dev/null
+          tar -xzf "$archive" -C "$WORK_DIR"
+          src_dir="$WORK_DIR/${PRODUCT}-${SOURCE_COMMIT}"
+          channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$src_dir/rust-toolchain.toml")"
+          if [[ -z "$channel" ]]; then
+            echo "::error::Could not determine Rust channel from rust-toolchain.toml"
+            exit 1
+          fi
+          {
+            echo "src_dir=$src_dir"
+            echo "rust_channel=$channel"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ steps.source.outputs.rust_channel }}
+
+      - name: Render Debian templates and build .deb
+        env:
+          SRC_DIR: ${{ steps.source.outputs.src_dir }}
+        run: |
+          set -euo pipefail
+          python3 scripts/render_template.py \
+            --distro debian \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --version "$VERSION" \
+            --output "$SRC_DIR/debian"
+          (cd "$SRC_DIR" && dpkg-buildpackage -b -uc -us)
+          mapfile -t debs < <(find "$WORK_DIR" -maxdepth 1 -type f -name '*.deb')
+          if (( ${#debs[@]} != 1 )); then
+            echo "::error::Expected one .deb package, found ${#debs[@]}"
+            exit 1
+          fi
+          dpkg-deb --info "${debs[0]}"
+          dpkg-deb --contents "${debs[0]}"
+          cp "${debs[0]}" "$OUT_DIR/"
+          pkg_name="$(basename "${debs[0]}")"
+          python3 scripts/write_manifest.py \
+            --distribution debian \
+            --product "$PRODUCT" \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --output-dir "$OUT_DIR" \
+            --files "$pkg_name" \
+            --packaging-commit "$GITHUB_SHA" \
+            --workflow-run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Upload Debian package artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: debian-package
+          path: /tmp/deb-out/
+          if-no-files-found: error
+          retention-days: 14
+
+  build-rpm:
+    name: Build Fedora RPM/SRPM
+    if: ${{ inputs.channel == 'linux' || inputs.channel == 'all' || inputs.channel == 'rpm' }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      # fedora:43 multi-arch index digest resolved 2026-11-15.
+      CONTAINER_IMAGE: fedora:43@sha256:f01112b9a1f1d0504ad962d9adfa401425033f8ab067e0a821904ebdde5b8ca5
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+      IN_DIR: /tmp/rpm-in
+      OUT_DIR: /tmp/rpm-out
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare verified source and render RPM spec
+        run: |
+          set -euo pipefail
+          mkdir -p "$IN_DIR" "$OUT_DIR"
+          bash scripts/download-source.sh \
+            "$PRODUCT" "$SOURCE_COMMIT" "$IN_DIR/${PRODUCT}-${SOURCE_COMMIT}.tar.gz" "$SOURCE_SHA256" >/dev/null
+          python3 scripts/render_template.py \
+            --distro rpm \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --version "$VERSION" \
+            --output "$IN_DIR/koma.spec"
+
+      - name: Build RPM and SRPM in pinned Fedora container
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e "SOURCE_COMMIT=$SOURCE_COMMIT" \
+            -v "$IN_DIR:/in:ro" \
+            -v "$OUT_DIR:/out" \
+            -v "$GITHUB_WORKSPACE/scripts:/scripts:ro" \
+            "$CONTAINER_IMAGE" \
+            bash /scripts/ci-rpm-in-container.sh
+
+      - name: Write RPM checksums and manifest
+        run: |
+          set -euo pipefail
+          mapfile -t rpm_files < <(find "$OUT_DIR" -maxdepth 1 -type f -name '*.rpm' -printf '%f\n' | sort)
+          if (( ${#rpm_files[@]} == 0 )); then
+            echo "::error::No RPM artifacts produced"
+            exit 1
+          fi
+          python3 scripts/write_manifest.py \
+            --distribution rpm \
+            --product "$PRODUCT" \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --output-dir "$OUT_DIR" \
+            --files "${rpm_files[@]}" \
+            --container-image "$CONTAINER_IMAGE" \
+            --packaging-commit "$GITHUB_SHA" \
+            --workflow-run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rpm-package
+          path: /tmp/rpm-out/
+          if-no-files-found: error
+          retention-days: 14
+
+  build-alpine:
+    name: Build Alpine musl (.apk)
+    if: ${{ inputs.channel == 'linux' || inputs.channel == 'all' || inputs.channel == 'alpine' }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      # alpine:edge multi-arch index digest resolved 2026-11-15.
+      CONTAINER_IMAGE: alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+      IN_DIR: /tmp/alpine-in
+      OUT_DIR: /tmp/alpine-out
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare verified source and render APKBUILD
+        run: |
+          set -euo pipefail
+          mkdir -p "$IN_DIR" "$OUT_DIR"
+          bash scripts/download-source.sh \
+            "$PRODUCT" "$SOURCE_COMMIT" "$IN_DIR/${PRODUCT}-${SOURCE_COMMIT}.tar.gz" "$SOURCE_SHA256" >/dev/null
+          python3 scripts/render_template.py \
+            --distro alpine \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --version "$VERSION" \
+            --output "$IN_DIR/APKBUILD"
+
+      - name: Build APK in pinned Alpine container
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e "SOURCE_COMMIT=$SOURCE_COMMIT" \
+            -v "$IN_DIR:/in:ro" \
+            -v "$OUT_DIR:/out" \
+            -v "$GITHUB_WORKSPACE/scripts:/scripts:ro" \
+            "$CONTAINER_IMAGE" \
+            sh /scripts/ci-alpine-in-container.sh
+
+      - name: Write Alpine checksums and manifest
+        run: |
+          set -euo pipefail
+          mapfile -t apk_files < <(find "$OUT_DIR" -maxdepth 1 -type f -name '*.apk' -printf '%f\n' | sort)
+          if (( ${#apk_files[@]} == 0 )); then
+            echo "::error::No APK artifacts produced"
+            exit 1
+          fi
+          python3 scripts/write_manifest.py \
+            --distribution alpine \
+            --product "$PRODUCT" \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --output-dir "$OUT_DIR" \
+            --files "${apk_files[@]}" \
+            --container-image "$CONTAINER_IMAGE" \
+            --packaging-commit "$GITHUB_SHA" \
+            --workflow-run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Upload Alpine artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: alpine-package
+          path: /tmp/alpine-out/
+          if-no-files-found: error
+          retention-days: 14
+
+  validate-nix:
+    name: Validate Nix flake derivation
+    if: ${{ inputs.channel == 'linux' || inputs.channel == 'all' || inputs.channel == 'nix' }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+      OUT_DIR: /tmp/nix-out
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Render and evaluate Nix flake
+        run: |
+          set -euo pipefail
+          python3 scripts/render_template.py \
+            --distro nix \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --version "$VERSION" \
+            --output "$OUT_DIR"
+          (
+            cd "$OUT_DIR"
+            nix-instantiate --parse koma.nix >/dev/null
+            nix-instantiate --parse flake.nix >/dev/null
+            git init -q
+            git config user.name "CI"
+            git config user.email "ci@komawm.org"
+            git add koma.nix flake.nix
+            git commit -qm "Evaluate flake candidate"
+            nix flake metadata
+            nix eval --raw .#packages.x86_64-linux.koma.drvPath
+            rm -rf .git flake.lock
+          )
+          python3 scripts/write_manifest.py \
+            --distribution nix \
+            --product "$PRODUCT" \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --output-dir "$OUT_DIR" \
+            --files koma.nix flake.nix \
+            --packaging-commit "$GITHUB_SHA" \
+            --workflow-run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Upload Nix artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nix-flake
+          path: /tmp/nix-out/
+          if-no-files-found: error
+          retention-days: 14
+
+  validate-homebrew:
+    name: Validate Homebrew formula
+    if: ${{ inputs.channel == 'linux' || inputs.channel == 'all' || inputs.channel == 'homebrew' }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+      OUT_DIR: /tmp/homebrew-out
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Render and syntax-check Homebrew formula
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT_DIR"
+          python3 scripts/render_template.py \
+            --distro homebrew \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --version "$VERSION" \
+            --output "$OUT_DIR/koma.rb"
+          ruby -c "$OUT_DIR/koma.rb"
+          if command -v brew >/dev/null 2>&1; then
+            brew style "$OUT_DIR/koma.rb" || true
+          fi
+          python3 scripts/write_manifest.py \
+            --distribution homebrew \
+            --product "$PRODUCT" \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --output-dir "$OUT_DIR" \
+            --files koma.rb \
+            --packaging-commit "$GITHUB_SHA" \
+            --workflow-run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Upload Homebrew artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: homebrew-formula
+          path: /tmp/homebrew-out/
+          if-no-files-found: error
+          retention-days: 14
+
+  build-freebsd:
+    name: Build FreeBSD 15.1 amd64 (.pkg, experimental)
+    if: ${{ inputs.channel == 'all' || inputs.channel == 'freebsd' }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Stage verified source and FreeBSD templates
+        run: |
+          set -euo pipefail
+          mkdir -p _freebsd_stage/out
+          bash scripts/download-source.sh \
+            "$PRODUCT" "$SOURCE_COMMIT" "_freebsd_stage/${PRODUCT}-${SOURCE_COMMIT}.tar.gz" "$SOURCE_SHA256" >/dev/null
+          python3 scripts/render_template.py \
+            --distro freebsd \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --version "$VERSION" \
+            --output _freebsd_stage/port
+
+      - name: Start FreeBSD 15.1 VM
+        uses: cross-platform-actions/action@82668f1fbd89d9c99487604f822cbf6716f124d3 # v1.7.0
+        with:
+          operating_system: freebsd
+          version: "15.1"
+          memory: 6G
+          cpu_count: 8
+
+      - name: Build and stage FreeBSD package inside guest
+        shell: cpa.sh {0}
+        env:
+          PRODUCT: ${{ inputs.product }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
+          SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+        run: |
+          set -eu
+          actual="$(sha256 -q "_freebsd_stage/${PRODUCT}-${SOURCE_COMMIT}.tar.gz")"
+          if [ "$actual" != "$SOURCE_SHA256" ]; then
+            echo "Archive SHA-256 mismatch in FreeBSD guest: $actual" >&2
+            exit 1
+          fi
+          sudo pkg install -y pkgconf rust libudev-devd libinput seatd mesa-libs libdrm wayland libxkbcommon dbus fontconfig libdisplay-info
+          rustc --version
+          work_dir="/tmp/koma-freebsd-work"
+          stage_root="/tmp/koma-freebsd-root/usr/local"
+          export CARGO_TARGET_DIR="/tmp/koma-freebsd-target"
+          rm -rf "$work_dir" /tmp/koma-freebsd-root "$CARGO_TARGET_DIR"
+          mkdir -p "$work_dir"
+          tar -xzf "_freebsd_stage/${PRODUCT}-${SOURCE_COMMIT}.tar.gz" -C "$work_dir"
+          src_dir="$work_dir/${PRODUCT}-${SOURCE_COMMIT}"
+          (
+            cd "$src_dir"
+            test -f Cargo.lock
+            cargo build --release --locked --package koma --package komactl \
+              --package koma-mcp --package koma-overview
+          )
+          mkdir -p "$stage_root/bin" "$stage_root/share/wayland-sessions" "$stage_root/share/xdg-desktop-portal" \
+            "$stage_root/share/doc/koma/examples" "$stage_root/share/licenses/koma"
+          install -m 755 "$CARGO_TARGET_DIR/release/koma" "$stage_root/bin/koma"
+          install -m 755 "$CARGO_TARGET_DIR/release/komactl" "$stage_root/bin/komactl"
+          install -m 755 "$CARGO_TARGET_DIR/release/koma-mcp" "$stage_root/bin/koma-mcp"
+          install -m 755 "$CARGO_TARGET_DIR/release/koma-overview" "$stage_root/bin/koma-overview"
+          install -m 755 "$src_dir/resources/koma-session" "$stage_root/bin/koma-session"
+          install -m 644 "$src_dir/resources/koma.desktop" "$stage_root/share/wayland-sessions/koma.desktop"
+          install -m 644 "$src_dir/resources/koma-portals.conf" "$stage_root/share/xdg-desktop-portal/koma-portals.conf"
+          install -m 644 "$src_dir/resources/greetd-config.toml" "$stage_root/share/doc/koma/examples/greetd-config.toml"
+          install -m 644 "$src_dir/examples/init.lua" "$stage_root/share/doc/koma/examples/init.lua"
+          install -m 644 "$src_dir/LICENSE" "$stage_root/share/licenses/koma/LICENSE"
+          pkg create -M _freebsd_stage/port/pkg-manifest.ucl \
+            -r /tmp/koma-freebsd-root \
+            -p _freebsd_stage/port/pkg-plist \
+            -o _freebsd_stage/out
+
+      - name: Write FreeBSD checksums and manifest
+        run: |
+          set -euo pipefail
+          mapfile -t pkg_files < <(find _freebsd_stage/out -maxdepth 1 -type f -name '*.pkg' -printf '%f\n' | sort)
+          if (( ${#pkg_files[@]} != 1 )); then
+            echo "::error::Expected one FreeBSD .pkg artifact, found ${#pkg_files[@]}"
+            exit 1
+          fi
+          python3 scripts/write_manifest.py \
+            --distribution freebsd \
+            --product "$PRODUCT" \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --output-dir _freebsd_stage/out \
+            --files "${pkg_files[@]}" \
+            --packaging-commit "$GITHUB_SHA" \
+            --workflow-run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Upload FreeBSD artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: freebsd-package
+          path: _freebsd_stage/out/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Upload matrix assets to product release
+    if: ${{ !failure() && !cancelled() && inputs.publish && github.event_name == 'workflow_dispatch' }}
+    needs:
+      - prepare
+      - build-debian
+      - build-rpm
+      - build-alpine
+      - validate-nix
+      - validate-homebrew
+      - build-freebsd
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+    env:
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      EXPECTED_COMMIT: ${{ needs.prepare.outputs.commit }}
+      GH_TOKEN: ${{ secrets.PRODUCT_RELEASE_TOKEN }}
+    steps:
+      - name: Require release credential
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::PRODUCT_RELEASE_TOKEN is not set in the 'release' environment of this repository."
+            exit 1
+          fi
+
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download built channel artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+
+      - name: Verify checksums, manifests, and release target
+        run: |
+          set -euo pipefail
+          release_tag="$(gh release view "$TAG" --repo "komawm/$PRODUCT" --json tagName --jq .tagName)"
+          if [[ "$release_tag" != "$TAG" ]]; then
+            echo "::error::Release komawm/$PRODUCT $TAG not found (got '$release_tag')"
+            exit 1
+          fi
+          resolved_commit="$(bash scripts/resolve-tag.sh "$PRODUCT" "$TAG")"
+          if [[ "$resolved_commit" != "$EXPECTED_COMMIT" ]]; then
+            echo "::error::Tag $TAG resolved to $resolved_commit, expected $EXPECTED_COMMIT"
+            exit 1
+          fi
+          python3 scripts/stage_release.py \
+            --dist-dir dist \
+            --stage-dir upload-stage \
+            --product "$PRODUCT" \
+            --tag "$TAG" \
+            --commit "$EXPECTED_COMMIT"
+
+      - name: Upload verified assets to product release
+        run: |
+          set -euo pipefail
+          mapfile -t assets < <(find upload-stage -maxdepth 1 -type f | sort)
+          if (( ${#assets[@]} == 0 )); then
+            echo "::error::No staged release assets found"
+            exit 1
+          fi
+          gh release upload "$TAG" "${assets[@]}" --repo "komawm/$PRODUCT" --clobber
+          gh release view "$TAG" --repo "komawm/$PRODUCT" --json assets --jq '.assets[].name'

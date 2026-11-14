@@ -1,0 +1,110 @@
+# UNACCEPTED integration template. Rendering does not approve build/publication.
+{
+  lib,
+  rustPlatform,
+  fetchurl,
+  pkg-config,
+  dbus,
+  fontconfig,
+  libGL,
+  libdisplay-info,
+  libgbm,
+  libinput,
+  libxkbcommon,
+  seatd,
+  systemd,
+  wayland,
+  src ? fetchurl {
+    url = "https://github.com/komawm/koma/archive/@SOURCE_COMMIT@.tar.gz";
+    sha256 = "@SOURCE_SHA256@";
+  },
+  lockFile ? "${src}/Cargo.lock",
+}:
+
+rustPlatform.buildRustPackage {
+  pname = "koma";
+  version = "@VERSION@";
+  inherit src;
+
+  cargoLock = {
+    inherit lockFile;
+    allowBuiltinFetchGit = true;
+  };
+
+  cargoBuildFlags = [
+    "--locked"
+    "-p"
+    "koma"
+    "-p"
+    "komactl"
+    "-p"
+    "koma-mcp"
+    "-p"
+    "koma-overview"
+  ];
+
+  cargoTestFlags = [
+    "--locked"
+    "--workspace"
+  ];
+
+  nativeBuildInputs = [
+    rustPlatform.bindgenHook
+    pkg-config
+  ];
+
+  buildInputs = [
+    dbus
+    fontconfig
+    libGL
+    libdisplay-info
+    libgbm
+    libinput
+    libxkbcommon
+    seatd
+    systemd
+    wayland
+  ];
+
+  env = {
+    # Keep dlopen'd graphics and Wayland libraries in RPATH on NixOS.
+    RUSTFLAGS = toString (
+      map (arg: "-C link-arg=" + arg) [
+        "-Wl,--push-state,--no-as-needed"
+        "-lEGL"
+        "-lwayland-client"
+        "-lwayland-server"
+        "-Wl,--pop-state"
+      ]
+    );
+  };
+
+  postPatch = ''
+    patchShebangs resources/koma-session
+    substituteInPlace resources/koma.service \
+      --replace-fail 'ExecStart=koma' "ExecStart=$out/bin/koma"
+  '';
+
+  postInstall = ''
+    install -Dm755 resources/koma-session "$out/bin/koma-session"
+    install -Dm644 resources/koma.desktop "$out/share/wayland-sessions/koma.desktop"
+    install -Dm644 resources/koma.service "$out/lib/systemd/user/koma.service"
+    install -Dm644 resources/koma-shutdown.target "$out/lib/systemd/user/koma-shutdown.target"
+    install -Dm644 resources/koma-portals.conf "$out/share/xdg-desktop-portal/koma-portals.conf"
+    install -Dm644 resources/greetd-config.toml "$out/share/doc/koma/examples/greetd-config.toml"
+    install -Dm644 examples/init.lua "$out/share/doc/koma/examples/init.lua"
+    install -Dm644 LICENSE "$out/share/licenses/koma/LICENSE"
+  '';
+
+  passthru = {
+    providedSessions = [ "koma" ];
+  };
+
+  meta = {
+    description = "Wayland tiling compositor with explicit desktop automation interfaces";
+    homepage = "https://github.com/komawm/koma";
+    license = lib.licenses.gpl3Plus;
+    mainProgram = "koma";
+    platforms = lib.platforms.linux;
+  };
+}

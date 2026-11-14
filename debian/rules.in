@@ -1,0 +1,34 @@
+#!/usr/bin/make -f
+# UNACCEPTED integration template. Rendering does not approve build/publication.
+# Builds Koma @VERSION@ from verified commit @SOURCE_COMMIT@ (sha256 @SOURCE_SHA256@).
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	test -f Cargo.lock
+	command -v cargo >/dev/null 2>&1
+
+override_dh_auto_build:
+	cargo build --release --locked --package koma --package komactl \
+		--package koma-mcp --package koma-overview
+
+override_dh_auto_test:
+
+override_dh_auto_install:
+	install -Dm755 target/release/koma debian/koma/usr/bin/koma
+	install -Dm755 target/release/komactl debian/koma/usr/bin/komactl
+	install -Dm755 target/release/koma-mcp debian/koma/usr/bin/koma-mcp
+	install -Dm755 target/release/koma-overview debian/koma/usr/bin/koma-overview
+	install -Dm755 resources/koma-session debian/koma/usr/bin/koma-session
+	install -Dm644 resources/koma.desktop debian/koma/usr/share/wayland-sessions/koma.desktop
+	install -Dm644 resources/koma.service debian/koma/usr/lib/systemd/user/koma.service
+	install -Dm644 resources/koma-shutdown.target debian/koma/usr/lib/systemd/user/koma-shutdown.target
+	install -Dm644 resources/koma-portals.conf debian/koma/usr/share/xdg-desktop-portal/koma-portals.conf
+	install -Dm644 resources/greetd-config.toml debian/koma/usr/share/doc/koma/examples/greetd-config.toml
+	install -Dm644 examples/init.lua debian/koma/usr/share/doc/koma/examples/init.lua
+	install -Dm644 LICENSE debian/koma/usr/share/doc/koma/LICENSE
+
+override_dh_dwz:

@@ -34,18 +34,24 @@ delivery becomes a task only after its runtime exists and is accepted.
 
 ## Local workflow
 
-`just check` runs local metadata, Python syntax, Arch shell-template, and
-`actionlint` workflow checks. This repository does not require generic CI,
-CodeQL, bot review, or an Issue/PR workflow.
+`just check` runs `scripts/verify.py` (TOML, Python AST, canonical links, secret
+scan, placeholder/license validation, disposable smoke rendering across all
+target distros, syntax checks, and CD workflow invariants), `shellcheck` across
+shell templates, CI container scripts, and `vm/*.sh`, and `actionlint` across
+`.github/workflows/*.yml`. This repository does not require generic CI, CodeQL,
+bot review, or an Issue/PR workflow.
 
 ## Development prerelease CD (`v0.0.x`)
 
-[cd-archlinux.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-archlinux.yml)
-builds an Arch Linux package for an existing product development tag and can
-attach it to that product's existing GitHub Release. It is `workflow_dispatch`
-only; there is no push, tag, or schedule trigger. A development prerelease is
-not acceptance: `accepted = false` and `first_accepted_version = "0.1.0"` stay in
+Both [cd-archlinux.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-archlinux.yml)
+and [cd-release-matrix.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-release-matrix.yml)
+build packages for an existing product development tag and can attach them to
+that product's existing GitHub Release. Both are `workflow_dispatch` only; there
+is no push, tag, or schedule trigger. A development prerelease is not
+acceptance: `accepted = false` and `first_accepted_version = "0.1.0"` stay in
 [packaging.toml](https://github.com/komawm/packaging/blob/main/packaging.toml).
+
+### Arch Linux workflow (`cd-archlinux.yml`)
 
 | Input | Meaning |
 | --- | --- |
@@ -64,20 +70,76 @@ the package, rendered `PKGBUILD`, `namcap.log`, `SHA256SUMS-archlinux`, and
 `PACKAGE-MANIFEST.toml` (product, tag, commit, source SHA-256, package filename
 and SHA-256, build time, container digest, packaging commit, run URL).
 
-The `publish` job runs only when `publish` is `true`. It uses the protected
-`release` environment and its `PRODUCT_RELEASE_TOKEN` secret, fails if that
-secret is empty, re-verifies the artifact checksums and manifest identity,
-confirms that `komawm/<product>` has a release for exactly that tag and that the
-tag still resolves to the built commit, then uploads with `--clobber`:
+### Multi-distro matrix workflow (`cd-release-matrix.yml`)
 
-- `koma-<pkgver>-<pkgrel>-x86_64.pkg.tar.zst`
-- `SHA256SUMS-archlinux`
-- `PACKAGE-MANIFEST-archlinux.toml` (the manifest, renamed so it cannot
-  overwrite the product's own release files)
+| Input | Meaning |
+| --- | --- |
+| `product` | Product repository under `komawm` (`koma`) |
+| `tag` | Existing product tag matching `v0.MINOR.PATCH` |
+| `channel` | Target channel group: `linux` (default), `all` (includes experimental `freebsd`), or a single channel (`debian`, `rpm`, `alpine`, `nix`, `freebsd`, `homebrew`) |
+| `publish` | `false` (default) builds/validates only; `true` runs `publish` under `environment: release` |
+
+The `prepare` job resolves `tag` to an immutable 40-character commit via
+`scripts/resolve-tag.sh`, downloads the source tarball once via
+`scripts/download-source.sh`, and exports `version`, `commit`, and
+`source_sha256` to channel jobs:
+
+- `build-debian` (`ubuntu-24.04`): installs C/Wayland apt deps and the pinned
+  `rust-toolchain.toml` Rust compiler, renders `debian/`, builds unsigned `.deb`
+  with `dpkg-buildpackage -b -uc -us`, inspects via `dpkg-deb`, and writes
+  `SHA256SUMS-debian` + `PACKAGE-MANIFEST.toml`.
+- `build-rpm` (`ubuntu-24.04` -> digest-pinned `fedora:43` container): renders
+  `rpm/koma.spec.in` and runs `scripts/ci-rpm-in-container.sh` as unprivileged
+  `builder` to produce `.x86_64.rpm` and `.src.rpm`.
+- `build-alpine` (`ubuntu-24.04` -> digest-pinned `alpine:edge` container):
+  renders `alpine/APKBUILD.in` and runs `scripts/ci-alpine-in-container.sh` as
+  unprivileged `builder` (`abuild -r`) with `-C target-feature=-crt-static`.
+- `validate-nix` (`ubuntu-24.04`): renders `nix/`, parses `.nix` files with
+  `nix-instantiate --parse`, checks `nix flake metadata`, and evaluates the
+  derivation graph (`nix eval .#packages.x86_64-linux.koma.drvPath`).
+- `validate-homebrew` (`ubuntu-24.04`): renders `homebrew/koma.rb.in`, runs
+  `ruby -c`, and runs `brew style` when Linuxbrew is present.
+- `build-freebsd` (`ubuntu-24.04` -> `cross-platform-actions/action` FreeBSD
+  `15.1` `amd64` VM, opt-in via `channel=all` or `channel=freebsd`): builds with
+  `cargo build --release --locked` and stages a `.pkg` archive with
+  `pkg create -M pkg-manifest.ucl`. FreeBSD runtime behavior remains
+  unverified/experimental (`runtime_verified = false`).
+
+Each channel writes `SHA256SUMS-<distro>` and `PACKAGE-MANIFEST.toml` through
+`scripts/write_manifest.py`.
+
+The `publish` job in either workflow runs only when `publish` is `true` on manual
+`workflow_dispatch`. It runs under the protected `release` environment,
+verifies `PRODUCT_RELEASE_TOKEN`, re-checks checksums and manifest identity
+(`scripts/stage_release.py` in the matrix workflow), confirms that
+`komawm/<product>` has a release for that exact tag pointing to the built
+commit, then uploads assets (`--clobber`) with distribution-suffixed manifest
+and checksum filenames (`PACKAGE-MANIFEST-<distro>.toml`, `SHA256SUMS-<distro>`)
+so product release files are never clobbered.
 
 The product repository's own tag workflow creates the release (for Koma,
 `koma-<version>-x86_64-unknown-linux-gnu.tar.gz` and `SHA256SUMS`). Dispatch
 packaging CD only after that release exists.
+
+### GitHub Actions Secrets and `release` environment variables
+
+All credentials MUST be scoped to the protected `release` environment in
+`komawm/packaging` and MUST NOT be passed to build or validation jobs.
+
+| Secret / Variable | Scope | Purpose | Status in `v0.0.x` |
+| --- | --- | --- | --- |
+| `PRODUCT_RELEASE_TOKEN` (Secret) | `release` environment | Fine-grained PAT or GitHub App token with `Contents: Read and write` on `komawm/koma` (and `komawm/jiku` after acceptance) for `gh release upload` | **Required when `publish=true`** |
+| `AUR_SSH_PRIVATE_KEY` (Secret) | `release` environment | SSH deploy key for pushing accepted Arch `PKGBUILD`/`.SRCINFO` updates to AUR | Reserved for post-`v0.1.0` acceptance |
+| `APT_GPG_PRIVATE_KEY` (Secret) | `release` environment | Armored PGP signing key for signing accepted APT `Release.gpg` / `InRelease` metadata | Reserved for post-`v0.1.0` acceptance |
+| `COPR_CONFIG` (Secret) | `release` environment | Fedora COPR API token INI configuration (`~/.config/copr`) for submitting accepted SRPM builds | Reserved for post-`v0.1.0` acceptance |
+| `HOMEBREW_TAP_TOKEN` (Secret) | `release` environment | Fine-grained token scoped strictly to `komawm/homebrew-tap` to update accepted formula commits | Reserved for post-`v0.1.0` acceptance |
+| `CACHIX_AUTH_TOKEN` (Secret) | `release` environment | Cachix upload token for pushing accepted Nix derivation closures | Reserved for post-`v0.1.0` acceptance |
+| `KOMA_COPR_PROJECT`, `KOMA_APT_SUITE`, `KOMA_CACHIX_CACHE`, `KOMA_HOMEBREW_TAP_REPO` (Environment Variables) | `release` environment | Non-secret target coordinates for optional downstream channel publishing after `v0.1.0` | Optional / Reserved for post-`v0.1.0` |
+
+Unaccepted `v0.0.x` builds intentionally restrict publishing to `komawm/<product>`
+GitHub Releases via `PRODUCT_RELEASE_TOKEN` and never push to external package
+indexes (AUR, public APT, COPR, Homebrew taps, or binary caches) prior to
+`v0.1.0` acceptance.
 
 ### One-time credential setup
 
