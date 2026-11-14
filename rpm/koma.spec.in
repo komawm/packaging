@@ -13,7 +13,6 @@ Source0:        https://github.com/komawm/koma/archive/%{source_commit}.tar.gz#/
 
 BuildRequires:  dbus-devel
 BuildRequires:  fontconfig-devel
-BuildRequires:  libdisplay-info-devel
 BuildRequires:  libinput-devel
 BuildRequires:  libseat-devel
 BuildRequires:  libxkbcommon-devel

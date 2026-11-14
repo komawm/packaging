@@ -21,7 +21,6 @@ ONLY_FOR_ARCHS=	amd64
 ONLY_FOR_ARCHS_REASON=	Candidate packaging target covers FreeBSD 15+ amd64 only
 
 LIB_DEPENDS=	libdbus-1.so:devel/dbus \
-		libdisplay-info.so:devel/libdisplay-info \
 		libdrm.so:graphics/libdrm \
 		libfontconfig.so:x11-fonts/fontconfig \
 		libinput.so:x11/libinput \

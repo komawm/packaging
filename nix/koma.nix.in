@@ -7,7 +7,6 @@
   dbus,
   fontconfig,
   libGL,
-  libdisplay-info,
   libgbm,
   libinput,
   libxkbcommon,
@@ -57,7 +56,6 @@ rustPlatform.buildRustPackage {
     dbus
     fontconfig
     libGL
-    libdisplay-info
     libgbm
     libinput
     libxkbcommon

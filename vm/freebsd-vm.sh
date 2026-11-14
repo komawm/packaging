@@ -679,7 +679,7 @@ cmd_provision() {
         pkg update -f
         pkg install -y \
             pkgconf git curl ca_root_nss sudo \
-            dbus libdisplay-info libdrm fontconfig libinput \
+            dbus libdrm fontconfig libinput \
             seatd libudev-devd wayland libxkbcommon mesa-libs rust
         pkg install -y rustup-init || true
         mkdir -p /usr/local/etc/sudoers.d

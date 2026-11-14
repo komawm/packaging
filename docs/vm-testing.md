@@ -130,8 +130,8 @@ no host `xorriso` or Tcl `expect` required), drives FreeBSD `loader.efi` into
 single-user serial mode (`boot -s`) over a local Unix serial socket, runs
 non-interactive `bsdinstall script` from the ISO distribution sets, boots once to
 run `provision` (`pkgconf`, `git`, `curl`, `ca_root_nss`, `sudo`, `dbus`,
-`libdisplay-info`, `libdrm`, `fontconfig`, `libinput`, `seatd`, `libudev-devd`,
-`wayland`, `libxkbcommon`, `mesa-libs`, `rust`), and powers off cleanly.
+`libdrm`, `fontconfig`, `libinput`, `seatd`, `libudev-devd`, `wayland`,
+`libxkbcommon`, `mesa-libs`, `rust`), and powers off cleanly.
 
 ```bash
 export ISO_PATH=/path/to/read-only/isos
