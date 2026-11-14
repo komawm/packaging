@@ -9,9 +9,11 @@ usage() {
     cat <<'EOF'
 Usage: vm/arch-vm.sh <command> [args...]
 
-Headless QEMU/KVM Arch Linux VM for package install/launch/removal tests.
-Never opens a host window; uses serial-to-file, a QMP socket, and an optional
-VNC server bound to 127.0.0.1.
+QEMU/KVM Arch Linux VM for package install/launch/removal and Koma TTY tests.
+Defaults to headless (`VM_DISPLAY=none`) with serial-to-file, a QMP socket,
+and an optional VNC server bound to 127.0.0.1. Set `VM_DISPLAY` (e.g. `gtk,gl=on`
+or `egl-headless,rendernode=/dev/dri/renderD128`) to view locally or use host
+Virgl 3D rendering.
 
 Commands:
   seed                 Generate an ephemeral SSH key and a NoCloud CIDATA seed
@@ -39,8 +41,14 @@ Environment (defaults in brackets):
   VM_DISK_SIZE     qcow2 virtual size [40G]
   VM_CPUS / VM_MEM vCPUs / memory [4 / 6G]
   VM_SSH_PORT      Host loopback port forwarded to guest :22 [2222]
-  VM_VNC           VNC display number on 127.0.0.1, empty disables [empty]
+  VM_DISPLAY       QEMU `-display` backend [none]; e.g.:
+                     none (headless, QMP screendump only)
+                     egl-headless,rendernode=/dev/dri/renderD128 (host GPU Virgl + VNC)
+                     gtk,gl=on | sdl,gl=on (local window; requires qemu-ui-{gtk,sdl,opengl})
+  VM_VNC           VNC display number on 127.0.0.1 (1 => 127.0.0.1:5901),
+                   empty disables [empty]; use with `vncviewer 127.0.0.1:5901`
   VM_GPU           QEMU display device [virtio-vga if the module exists, else VGA]
+                   Use `virtio-vga-gl` with `gl=on` / `egl-headless` for 3D Virgl
   VM_OVMF_CODE     UEFI firmware [/usr/share/edk2/x64/OVMF_CODE.4m.fd]
   VM_OVMF_VARS     UEFI vars template [/usr/share/edk2/x64/OVMF_VARS.4m.fd]
   VM_GUEST_PROXY   HTTP proxy for guest downloads [none]; a host proxy on
@@ -75,6 +83,7 @@ VM_DISK_SIZE="${VM_DISK_SIZE:-40G}"
 VM_CPUS="${VM_CPUS:-4}"
 VM_MEM="${VM_MEM:-6G}"
 VM_SSH_PORT="${VM_SSH_PORT:-2222}"
+VM_DISPLAY="${VM_DISPLAY:-none}"
 VM_VNC="${VM_VNC:-}"
 default_gpu() {
     # virtio-vga lives in the optional qemu-hw-display-virtio-gpu module on Arch;
@@ -160,12 +169,11 @@ qemu_start() {
         -device qemu-xhci -device usb-kbd -device usb-tablet
         -object 'rng-random,id=rng0,filename=/dev/urandom'
         -device 'virtio-rng-pci,rng=rng0'
-        -display none
+        -display "$VM_DISPLAY"
         -monitor none
         -serial "file:$serial_log"
         -qmp "unix:$qmp_sock,server=on,wait=off"
         -pidfile "$pidfile"
-        -daemonize
     )
     if [[ "$mode" == install ]]; then
         local iso
@@ -180,8 +188,21 @@ qemu_start() {
     if [[ -n "$VM_VNC" ]]; then
         args+=(-vnc "127.0.0.1:$VM_VNC")
     fi
-    record "${args[*]}"
-    "${args[@]}"
+    if [[ "$VM_DISPLAY" == none || "$VM_DISPLAY" == egl-headless* ]]; then
+        args+=(-daemonize)
+        record "${args[*]}"
+        "${args[@]}"
+    else
+        record "${args[*]} (background, display=$VM_DISPLAY)"
+        "${args[@]}" </dev/null &
+        local bg_pid=$! i
+        for (( i = 0; i < 30; i++ )); do
+            [[ -f "$pidfile" ]] && break
+            kill -0 "$bg_pid" 2>/dev/null || die "qemu exited before writing pidfile"
+            sleep 0.1
+        done
+        [[ -f "$pidfile" ]] || die "timed out waiting for qemu pidfile: $pidfile"
+    fi
     log "started ($mode), serial log: $serial_log"
 }
 
@@ -360,7 +381,10 @@ cmd_status() {
     else
         printf 'stopped\n'
     fi
-    printf 'disk=%s\nevidence=%s\nguest_proxy=%s\ngpu=%s\n' "$disk" "$VM_EVIDENCE_DIR" "${guest_proxy:-none}" "$VM_GPU"
+    local vnc_desc=none
+    [[ -n "$VM_VNC" ]] && vnc_desc="127.0.0.1:$VM_VNC"
+    printf 'disk=%s\nevidence=%s\nguest_proxy=%s\ngpu=%s\ndisplay=%s\nvnc=%s\n' \
+        "$disk" "$VM_EVIDENCE_DIR" "${guest_proxy:-none}" "$VM_GPU" "$VM_DISPLAY" "$vnc_desc"
 }
 
 main() {
