@@ -1,8 +1,12 @@
 schema_version = 1
 development_version = "0.0.1"
 accepted = false
-remote_changes_enabled = false
-publish_enabled = false
+# The repository is published and its CD workflow may write to product
+# Releases, but only when manually dispatched with publish=true, approved by
+# the `release` environment, and given the PRODUCT_RELEASE_TOKEN secret.
+remote_changes_enabled = true
+publish_enabled = true
+automatic_publish = false
 infrastructure_license = "MIT"
 product_license = "GPL-3.0-or-later"
 
@@ -13,6 +17,19 @@ source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 template = "archlinux/PKGBUILD.in"
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
+
+[development_prerelease]
+version = "0.0.1"
+channel = "development"
+accepted = false
+publish_mode = "workflow_dispatch-with-release-environment"
+workflow = ".github/workflows/cd-archlinux.yml"
+publish_input_default = false
+environment = "release"
+required_secret = "PRODUCT_RELEASE_TOKEN"
+required_secret_permissions = "Contents: write on the target product repository only"
+products = ["koma"]
+release_assets = ["koma-<pkgver>-<pkgrel>-x86_64.pkg.tar.zst", "SHA256SUMS-archlinux", "PACKAGE-MANIFEST-archlinux.toml"]
 
 [jiku]
 status = "pending-runtime-implementation-and-acceptance"

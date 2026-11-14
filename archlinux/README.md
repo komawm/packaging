@@ -12,7 +12,15 @@ Jiku's unimplemented daemon. Product source, binaries, configuration examples,
 and license notices must retain their product license; this repository's MIT
 license applies to packaging infrastructure.
 
-Use a clean isolated Arch VM or build environment for the first build. Record
+The [CD workflow](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-archlinux.yml)
+renders this template for a resolved product tag commit and the SHA-256 of the
+downloaded GitHub archive, then runs `makepkg --syncdeps --noconfirm` as an
+unprivileged user inside a digest-pinned `archlinux:base-devel` container. Local
+`git archive` checksums can differ from GitHub's archive, so always use the
+checksum of the archive actually downloaded. A successful CD build is build
+evidence for a `v0.0.x` development prerelease, not package acceptance.
+
+Use a clean isolated Arch VM or build environment for install validation. Record
 source commit, archive checksum, exact dependencies and toolchain, build logs,
 package content, and install/remove/upgrade/rollback results. Never install or
 replace the host's current Hyprland session to validate this template. See the

@@ -6,7 +6,10 @@ metadata:
 shellcheck:
     shellcheck -s bash -e SC2034,SC2154 archlinux/PKGBUILD.in
 
-check: metadata shellcheck
+actionlint:
+    actionlint .github/workflows/*.yml
+
+check: metadata shellcheck actionlint
 
 hooks-install:
     lefthook install
