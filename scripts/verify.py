@@ -32,6 +32,7 @@ DIGEST_IMAGE = re.compile(r"^[a-z0-9.-]+(?:/[a-z0-9.-]+)*:[A-Za-z0-9._-]+@sha256
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     verify_repository_files(root)
+    verify_vm_harnesses(root)
     scan_for_secret_values(root)
     config = tomllib.loads((root / "packaging.toml").read_text(encoding="utf-8"))
     verify_top_level_policy(root, config)
@@ -56,6 +57,39 @@ def verify_repository_files(root: Path) -> None:
             for target in re.findall(r"\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
                 if not target.startswith(("https://", "mailto:", "#")):
                     raise SystemExit(f"Noncanonical link in {path.relative_to(root)}: {target}")
+
+
+def verify_vm_harnesses(root: Path) -> None:
+    """Validate VM helper permissions, syntax, --help output, and non-hardcoded ISO paths."""
+    vm_dir = root / "vm"
+    expected_exec = (
+        "arch-vm.sh",
+        "freebsd-vm.sh",
+        "guest-install.sh",
+        "koma-smoke.sh",
+        "wayland-probe.py",
+    )
+    for name in expected_exec:
+        path = vm_dir / name
+        if not path.is_file():
+            raise SystemExit(f"Missing VM helper script: vm/{name}")
+        if not (path.stat().st_mode & stat.S_IXUSR):
+            raise SystemExit(f"VM helper script must be executable: vm/{name}")
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"/mnt/(?:music|data)|/Workspace/", text):
+            raise SystemExit(f"Hardcoded workstation path in vm/{name}; use ISO_PATH or env vars")
+        if path.suffix == ".sh":
+            run_checked(["bash", "-n", str(path)], f"bash -n vm/{name}")
+
+    for cli_name in ("arch-vm.sh", "freebsd-vm.sh", "koma-smoke.sh", "wayland-probe.py"):
+        run_checked([str(vm_dir / cli_name), "--help"], f"vm/{cli_name} --help")
+
+    arch_text = (vm_dir / "arch-vm.sh").read_text(encoding="utf-8")
+    fbsd_text = (vm_dir / "freebsd-vm.sh").read_text(encoding="utf-8")
+    if "ISO_PATH" not in arch_text or "ISO_PATH" not in fbsd_text:
+        raise SystemExit("Both arch-vm.sh and freebsd-vm.sh must discover ISOs via ISO_PATH")
+    if "VM_SSH_PORT:-2223" not in fbsd_text or "VM_NAME:-freebsd-koma" not in fbsd_text:
+        raise SystemExit("freebsd-vm.sh must keep distinct defaults (freebsd-koma, port 2223)")
 
 
 def verify_top_level_policy(root: Path, config: dict) -> None:
