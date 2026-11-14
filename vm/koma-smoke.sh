@@ -116,13 +116,18 @@ step_namcap() {
 
 step_cli() {
     gssh -u tester "set -e
+        echo '\$ koma --help | head -n 5'; koma --help | head -n 5
+        echo '\$ koma --version'; koma --version
+        echo '\$ koma --bogus (expected rc=2)'; rc=0; koma --bogus >/dev/null 2>&1 || rc=\$?; echo \"rc=\$rc\"; test \"\$rc\" -eq 2
         echo '\$ koma --headless-check'; koma --headless-check
         echo '\$ komactl validate /usr/share/doc/koma/examples/init.lua'
         komactl validate /usr/share/doc/koma/examples/init.lua
         echo '\$ komactl gen-types | head -n 20'; komactl gen-types | head -n 20
         echo '\$ komactl gen-types | wc -l'; komactl gen-types | wc -l
         echo '\$ koma-mcp --print-tools | head -c 2000'; koma-mcp --print-tools | head -c 2000; echo
-        echo '\$ komactl (no args, usage, expected rc=1)'; komactl || echo rc=\$?
+        echo '\$ komactl --help | head -n 5'; komactl --help | head -n 5
+        echo '\$ komactl --version'; komactl --version
+        echo '\$ komactl (no args, usage, expected rc=2)'; rc=0; komactl >/dev/null 2>&1 || rc=\$?; echo \"rc=\$rc\"; test \"\$rc\" -eq 2
         echo '\$ ldd /usr/bin/koma'; ldd /usr/bin/koma"
 }
 
@@ -162,7 +167,13 @@ EOF
         echo '--- spawn foot ---'; setsid -f foot -e bash -c 'echo koma vm smoke; uname -a; sleep 600' >/tmp/foot.log 2>&1
         sleep 5; pgrep -a foot || { echo 'FAIL: foot not running'; cat /tmp/foot.log; fail=1; }
         echo '--- komactl config-status ---'; timeout 10 komactl config-status 2>&1 || fail=1
-        echo '--- komactl inventory ---'; timeout 10 komactl inventory 2>&1 || fail=1
+        echo '--- komactl inventory ---'
+        timeout 10 komactl inventory > /tmp/inventory.json 2>&1 || fail=1
+        cat /tmp/inventory.json
+        grep -qE '\"win_id\":[[:space:]]*\"win_' /tmp/inventory.json || { echo 'FAIL: no mapped window in inventory'; fail=1; }
+        echo '--- komactl capture ---'
+        timeout 10 komactl capture ws_01 /tmp/capture.rgba 2>&1 || fail=1
+        ls -la /tmp/capture.rgba; test -s /tmp/capture.rgba || { echo 'FAIL: empty capture'; fail=1; }
         exit \$fail" || tty_fail=1
     "$vm" screendump "$evidence/tty$tag-02-with-foot.png"
     gssh "pgrep -a -u tester -x koma && echo 'koma still alive after client spawn'" || tty_fail=1
@@ -170,10 +181,21 @@ EOF
 }
 
 step_tty_stop() {
+    local stop_fail=0
     gssh "pkill -TERM -u tester -x koma || true; sleep 3; pgrep -a -u tester -x koma && echo 'koma still running' || echo 'koma stopped'
         echo '--- koma-tty.log (tail 300) ---'; tail -n 300 /home/tester/koma-tty.log
-        echo '--- journal (koma/seat/drm, this boot) ---'; journalctl -b --no-pager -o short-monotonic -t kernel -t systemd-logind -t seatd | grep -iE 'koma|seat|drm|bochs|session' | tail -n 80"
+        echo '--- journal (koma/seat/drm, this boot) ---'; journalctl -b --no-pager -o short-monotonic -t kernel -t systemd-logind -t seatd | grep -iE 'koma|seat|drm|bochs|virtio|session' | tail -n 80"
     "$vm" scp-out /home/tester/koma-tty.log "$evidence/koma-tty$tag-full.log" || true
+    if [[ -f "$evidence/koma-tty$tag-full.log" ]]; then
+        grep -q 'koma exited rc=0' "$evidence/koma-tty$tag-full.log" || {
+            echo "FAIL: expected graceful shutdown 'koma exited rc=0' in $evidence/koma-tty$tag-full.log"
+            stop_fail=1
+        }
+    else
+        echo "FAIL: missing $evidence/koma-tty$tag-full.log"
+        stop_fail=1
+    fi
+    return "$stop_fail"
 }
 
 step_tarball() {

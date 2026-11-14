@@ -6,9 +6,13 @@ disposable QEMU/KVM Arch Linux guest. They implement step 5 of the
 rollback) without touching the host desktop session, GPU binding, boot
 configuration, system services, or device permissions.
 
-The VM is headless: `-display none`, serial console to a log file, a QMP control
-socket, and an optional VNC server bound to `127.0.0.1`. The framebuffer is
-captured with QMP `screendump`. Nothing requires root on the host.
+The VM defaults to headless (`VM_DISPLAY=none`): serial console to a log file, a QMP
+control socket, and an optional VNC server bound to `127.0.0.1` (`VM_VNC`). Set
+`VM_DISPLAY` (for example `gtk,gl=on`, `sdl,gl=on`, or
+`egl-headless,rendernode=/dev/dri/renderD128`) and optionally `VM_GPU=virtio-vga-gl`
+to view locally or accelerate guest rendering with host Virgl 3D. When
+`VM_DISPLAY=none`, the framebuffer is captured with QMP `screendump`. Nothing
+requires root on the host.
 
 ## Requirements
 
@@ -17,11 +21,17 @@ captured with QMP `screendump`. Nothing requires root on the host.
 - `qemu-img`, `ssh`, `scp`, `ssh-keygen`, `python3` (QMP client)
 - `mkfs.fat` (dosfstools) and `mcopy` (mtools) for the NoCloud seed image
 - An Arch Linux installer ISO in the read-only collection named by `ISO_PATH`
+- Optional host display / VNC / Virgl packages on Arch Linux:
+  - `qemu-ui-gtk`, `qemu-ui-sdl`, `qemu-ui-opengl` (local QEMU window with `VM_DISPLAY=gtk,gl=on` or `sdl,gl=on`)
+  - `qemu-ui-egl-headless` + `tigervnc` (`vncviewer`): headless host GPU Virgl (`VM_GPU=virtio-vga-gl VM_DISPLAY=egl-headless VM_VNC=1`) viewed via `vncviewer 127.0.0.1:5901`
 
 The guest display device defaults to `virtio-vga` when QEMU provides it (on Arch
-it lives in the optional `qemu-hw-display-virtio-gpu` package) and falls back to
-the standard `VGA` device, which the guest drives with the `bochs` DRM/KMS driver.
-Override with `VM_GPU`.
+it lives in the `qemu-hw-display-virtio-gpu` / `qemu-hw-display-virtio-vga`
+packages) and falls back to the standard `VGA` device, which the guest drives
+with the `bochs` DRM/KMS driver. Override with `VM_GPU` (`virtio-vga`,
+`virtio-vga-gl`, `VGA`). For local non-headless `VM_DISPLAY` backends (`gtk*` /
+`sdl*`), `vm/arch-vm.sh` runs QEMU in the background without `-daemonize` and
+waits for its pidfile before polling SSH.
 
 ## Layout and configuration
 
@@ -122,3 +132,17 @@ rendering on a display-only device, unknown command-line flags (including
 `--help`) are ignored and start the compositor, and SIGTERM ends the TTY
 compositor without a graceful shutdown. This run proves neither physical
 DRM/KMS hardware nor GPU support, and no Koma frame was rendered.
+
+## Post-v0.0.1 KOM-0011 verification (2026-11-15)
+
+Follow-up verification tested the unreleased `KOM-0011` fix series (`carryctx/kom-0011`) inside the same Arch Linux 7.3.4 QEMU/KVM guest under both `-device virtio-vga` (`1af4:1050`, VNC `127.0.0.1:5901`) and `-device VGA` (`bochs-drm` `1234:1111`), recorded under `recording/2026-11-15/vm-arch-koma-kom-0011/`:
+
+| Test | Result | Notes |
+| --- | --- | --- |
+| `smoke-cli` (`koma --help`, `--version`, `--bogus`, `--headless-check`, `komactl validate`/`gen-types`, `koma-mcp --print-tools`) | Pass | Unknown flags exit `2`; headless checks pass |
+| `koma --tty` (`seatd`, `virtio-vga` & `VGA`) | Pass | `llvmpipe` software KMS fallback advertises `wl_output` `Virtual-1` (`1280x800`); `foot` maps as `win_1_g1` inside `#58a6ff` active border |
+| `komactl capture ws_01` (`grid_225` over `SCM_RIGHTS` `memfd`) | Pass | Saved `4096000` RGBA8888 bytes (`1280x800`, `grid_cells: 225`) |
+| `logind` VT switch (`ctrl-alt-f2` via QMP) | Diagnostic pass | Logged `Permission denied (os error 13)` with explicit `polkit` (`org.freedesktop.login1.chvt`) and `seatd` guidance |
+| `SIGTERM` shutdown | Pass | `koma exited rc=0` cleanly on `virtio-vga` (`seatd`/`logind`) and `VGA` (`seatd`) |
+
+Boundary unchanged: software KMS (`llvmpipe`) in QEMU establishes compositor protocol, client mapping, IPC frame capture, CLI flag handling, and signal shutdown on emulated display devices; it still does not prove physical GPU DRM/KMS scanout or Virgl 3D hardware acceleration.
