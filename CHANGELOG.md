@@ -10,7 +10,7 @@ versions follow the Koma `v0.0.x` development series until `v0.1.0` acceptance.
 
 - Arch template runtime dependencies now match the `v0.0.1` binaries (`seatd`
   provides `libseat`), and the build honors Koma's pinned `rust-toolchain.toml`
-  through `rustup`.
+  through `rustup`; the empty `koma-debug` split package is disabled.
 
 ## [0.0.1] - 2026-11-14
 
