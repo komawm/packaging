@@ -4,7 +4,7 @@ pkgname=koma
 pkgver='@VERSION@'
 pkgrel=1
 pkgdesc='Wayland tiling compositor with explicit desktop automation interfaces'
-arch=('x86_64')
+arch=('x86_64' 'aarch64')
 url='https://github.com/komawm/koma'
 license=('GPL-3.0-or-later')
 # Runtime libraries derived from ldd of the v0.0.1 binaries (libseat is shipped by seatd).

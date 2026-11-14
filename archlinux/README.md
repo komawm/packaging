@@ -1,7 +1,8 @@
 # Arch Linux template
 
 [PKGBUILD.in](https://github.com/komawm/packaging/blob/main/archlinux/PKGBUILD.in)
-is an unaccepted integration template. There is intentionally no ready-to-build
+is an unaccepted integration template targeting `x86_64` and `aarch64`
+(including Arch Linux ARM and Asahi Arch). There is intentionally no ready-to-build
 PKGBUILD until an immutable source commit and the real downloaded archive's
 SHA-256 are supplied. A renderer can produce a local review candidate, but
 neither rendering nor shell validation establishes a successful package.

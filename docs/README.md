@@ -9,6 +9,7 @@ credentials, and licensing boundaries. Target template guides cover
 [Alpine Linux](https://github.com/komawm/packaging/blob/main/alpine/README.md),
 [Nix / NixOS](https://github.com/komawm/packaging/blob/main/nix/README.md),
 [FreeBSD 15+](https://github.com/komawm/packaging/blob/main/freebsd/README.md),
+[OpenBSD 8+](https://github.com/komawm/packaging/blob/main/openbsd/README.md),
 and [Homebrew on Linux](https://github.com/komawm/packaging/blob/main/homebrew/README.md).
 [VM testing](https://github.com/komawm/packaging/blob/main/docs/vm-testing.md)
 documents the headless QEMU/KVM install/launch/removal harness and its results.

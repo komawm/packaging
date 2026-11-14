@@ -73,6 +73,18 @@ DISTRO_TEMPLATES: dict[str, DistroTemplateSpec] = {
         allow_hyphen_version=False,
         single_file=False,
     ),
+    "openbsd": DistroTemplateSpec(
+        templates=(
+            ("openbsd/Makefile.in", "Makefile", 0o644),
+            ("openbsd/distinfo.in", "distinfo", 0o644),
+        ),
+        static_files=(
+            ("openbsd/pkg/DESCR", "pkg/DESCR", 0o644),
+            ("openbsd/pkg/PLIST", "pkg/PLIST", 0o644),
+        ),
+        allow_hyphen_version=False,
+        single_file=False,
+    ),
     "homebrew": DistroTemplateSpec(
         templates=(("homebrew/koma.rb.in", "koma.rb", 0o644),),
         allow_hyphen_version=True,

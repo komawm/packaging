@@ -1,8 +1,9 @@
 # Fedora / RHEL (RPM) template
 
 [koma.spec.in](https://github.com/komawm/packaging/blob/main/rpm/koma.spec.in)
-is an unaccepted RPM spec template targeting Fedora `x86_64` from an immutable
-[Koma](https://github.com/komawm/koma) source archive and checksum.
+is an unaccepted RPM spec template targeting Fedora `x86_64` and `aarch64`
+(including Fedora Workstation and Fedora Asahi Remix on Apple Silicon) from an
+immutable [Koma](https://github.com/komawm/koma) source archive and checksum.
 
 ## Build and COPR considerations
 

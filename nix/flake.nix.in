@@ -18,19 +18,32 @@
       koma-src,
     }:
     let
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
-      komaPkg = pkgs.callPackage ./koma.nix {
-        src = koma-src;
-        lockFile = "${koma-src}/Cargo.lock";
-      };
+      supportedSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      mkKoma =
+        system:
+        nixpkgs.legacyPackages.${system}.callPackage ./koma.nix {
+          src = koma-src;
+          lockFile = "${koma-src}/Cargo.lock";
+        };
     in
     {
-      packages.${system} = {
-        koma = komaPkg;
-        default = komaPkg;
-      };
+      packages = forAllSystems (
+        system:
+        let
+          komaPkg = mkKoma system;
+        in
+        {
+          koma = komaPkg;
+          default = komaPkg;
+        }
+      );
 
-      checks.${system}.koma = komaPkg;
+      checks = forAllSystems (system: {
+        koma = mkKoma system;
+      });
     };
 }

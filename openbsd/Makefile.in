@@ -1,0 +1,57 @@
+# UNACCEPTED integration template (experimental / runtime-unverified).
+# Rendering does not approve build, OpenBSD portability, or publication.
+
+COMMENT =	Wayland tiling compositor with explicit desktop automation interfaces
+
+PKGNAME =	koma-@VERSION@
+GH_ACCOUNT =	komawm
+GH_PROJECT =	koma
+GH_COMMIT =	@SOURCE_COMMIT@
+DISTNAME =	koma-@SOURCE_COMMIT@
+
+CATEGORIES =	wayland x11
+
+HOMEPAGE =	https://github.com/komawm/koma
+
+MAINTAINER =	Koma Packaging <packaging@komawm.org>
+
+# License: GPLv3+
+PERMIT_PACKAGE =	Yes
+
+ONLY_FOR_ARCHS =	amd64 aarch64
+ONLY_FOR_ARCHS_REASON =	Candidate packaging target covers OpenBSD 8+ amd64 and aarch64
+
+MODULES =	devel/cargo
+
+BUILD_DEPENDS =	devel/pkgconf
+
+LIB_DEPENDS =	sysutils/libudev-openbsd \
+		sysutils/seatd \
+		wayland/libinput-openbsd \
+		wayland/wayland \
+		x11/dbus \
+		x11/xkbcommon
+
+# Expected archive SHA-256 verified via distinfo: @SOURCE_SHA256@
+MODCARGO_BUILD_ARGS =	--locked -p koma -p komactl -p koma-mcp -p koma-overview
+
+do-build:
+	cd ${WRKSRC} && cargo build --release ${MODCARGO_BUILD_ARGS}
+
+do-install:
+	${INSTALL_PROGRAM} ${WRKSRC}/target/release/koma ${PREFIX}/bin/koma
+	${INSTALL_PROGRAM} ${WRKSRC}/target/release/komactl ${PREFIX}/bin/komactl
+	${INSTALL_PROGRAM} ${WRKSRC}/target/release/koma-mcp ${PREFIX}/bin/koma-mcp
+	${INSTALL_PROGRAM} ${WRKSRC}/target/release/koma-overview ${PREFIX}/bin/koma-overview
+	${INSTALL_SCRIPT} ${WRKSRC}/resources/koma-session ${PREFIX}/bin/koma-session
+	${INSTALL_DATA_DIR} ${PREFIX}/share/wayland-sessions
+	${INSTALL_DATA} ${WRKSRC}/resources/koma.desktop ${PREFIX}/share/wayland-sessions/koma.desktop
+	${INSTALL_DATA_DIR} ${PREFIX}/share/xdg-desktop-portal
+	${INSTALL_DATA} ${WRKSRC}/resources/koma-portals.conf ${PREFIX}/share/xdg-desktop-portal/koma-portals.conf
+	${INSTALL_DATA_DIR} ${PREFIX}/share/doc/koma/examples
+	${INSTALL_DATA} ${WRKSRC}/resources/greetd-config.toml ${PREFIX}/share/doc/koma/examples/greetd-config.toml
+	${INSTALL_DATA} ${WRKSRC}/examples/init.lua ${PREFIX}/share/doc/koma/examples/init.lua
+	${INSTALL_DATA_DIR} ${PREFIX}/share/licenses/koma
+	${INSTALL_DATA} ${WRKSRC}/LICENSE ${PREFIX}/share/licenses/koma/LICENSE
+
+.include <bsd.port.mk>

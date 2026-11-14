@@ -172,6 +172,10 @@ def verify_all_distro_templates(root: Path, config: dict) -> None:
             ("share/licenses/koma/LICENSE", "GPLv3+"),
             "FreeBSD template must declare GPLv3+ and install LICENSE",
         ),
+        "openbsd": (
+            ("share/licenses/koma/LICENSE", "GPLv3+"),
+            "OpenBSD template must declare GPLv3+ and install LICENSE",
+        ),
         "homebrew": (
             ('license "GPL-3.0-or-later"', '.install "LICENSE"'),
             "Homebrew template must declare GPL-3.0-or-later and install LICENSE",
@@ -248,6 +252,17 @@ def validate_rendered_distro(distro: str, dest: Path, written: list[Path]) -> No
         for binary in ("bin/koma", "bin/komactl", "bin/koma-mcp", "bin/koma-overview"):
             if binary not in plist:
                 raise SystemExit(f"freebsd/pkg-plist missing {binary}")
+    elif distro == "openbsd":
+        verify_make_recipes(dest / "Makefile", ("do-build:", "do-install:"))
+        plist = (dest / "pkg/PLIST").read_text(encoding="utf-8")
+        for binary in ("bin/koma", "bin/komactl", "bin/koma-mcp", "bin/koma-overview", "bin/koma-session"):
+            if binary not in plist:
+                raise SystemExit(f"openbsd/pkg/PLIST missing {binary}")
+    elif distro == "nix":
+        flake = (dest / "flake.nix").read_text(encoding="utf-8")
+        for system in ("x86_64-linux", "aarch64-linux"):
+            if system not in flake:
+                raise SystemExit(f"Rendered nix/flake.nix missing {system}")
 
 
 def verify_make_recipes(makefile: Path, required_targets: tuple[str, ...]) -> None:
@@ -399,7 +414,15 @@ def verify_workflows(root: Path, config: dict) -> None:
         raise SystemExit("Arch build CONTAINER_IMAGE must match the pinned container image")
 
     matrix = pre.get("matrix")
-    if not isinstance(matrix, dict) or matrix.get("channels") != ["debian", "rpm", "alpine", "nix", "freebsd", "homebrew"]:
+    if not isinstance(matrix, dict) or matrix.get("channels") != [
+        "debian",
+        "rpm",
+        "alpine",
+        "nix",
+        "freebsd",
+        "openbsd",
+        "homebrew",
+    ]:
         raise SystemExit("[development_prerelease.matrix] must declare the multi-distro channels")
     matrix_wf_path = verify_prerelease_metadata(matrix, config, root)
     matrix_wf = verify_workflow_common(matrix_wf_path, matrix["required_secret"])

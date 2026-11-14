@@ -2,7 +2,8 @@
 
 The [Nix template directory](https://github.com/komawm/packaging/tree/main/nix)
 provides `koma.nix.in` and `flake.nix.in` for evaluating and building
-[Koma](https://github.com/komawm/koma) from an immutable commit and tarball
+[Koma](https://github.com/komawm/koma) on `x86_64-linux` and `aarch64-linux`
+(including NixOS on Apple Silicon M1–M4) from an immutable commit and tarball
 checksum without inventing hashes.
 
 ## Upstream `flake.nix` status

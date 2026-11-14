@@ -16,6 +16,7 @@ source_repository = "https://github.com/komawm/koma"
 source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 template = "archlinux/PKGBUILD.in"
+architectures = ["x86_64", "aarch64"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
 
 [debian]
@@ -25,7 +26,7 @@ source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 templates = ["debian/changelog.in", "debian/control.in", "debian/rules.in"]
 static_files = ["debian/copyright", "debian/source/format"]
-architectures = ["amd64"]
+architectures = ["amd64", "arm64"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
 
 [rpm]
@@ -34,7 +35,7 @@ source_repository = "https://github.com/komawm/koma"
 source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 template = "rpm/koma.spec.in"
-architectures = ["x86_64"]
+architectures = ["x86_64", "aarch64"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
 
 [alpine]
@@ -43,7 +44,7 @@ source_repository = "https://github.com/komawm/koma"
 source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 template = "alpine/APKBUILD.in"
-architectures = ["x86_64"]
+architectures = ["x86_64", "aarch64"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
 
 [nix]
@@ -53,6 +54,7 @@ source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 templates = ["nix/koma.nix.in", "nix/flake.nix.in"]
 upstream_flake_present = false
+architectures = ["x86_64-linux", "aarch64-linux"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
 
 [freebsd]
@@ -64,7 +66,19 @@ source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 templates = ["freebsd/Makefile.in", "freebsd/distinfo.in", "freebsd/pkg-manifest.ucl.in"]
 static_files = ["freebsd/pkg-descr", "freebsd/pkg-plist"]
-architectures = ["amd64"]
+architectures = ["amd64", "aarch64"]
+packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
+
+[openbsd]
+status = "template-unaccepted-experimental"
+runtime_verified = false
+target_os = "OpenBSD 8+"
+source_repository = "https://github.com/komawm/koma"
+source_revision_required = "full-40-character-commit"
+source_checksum_required = "sha256"
+templates = ["openbsd/Makefile.in", "openbsd/distinfo.in"]
+static_files = ["openbsd/pkg/DESCR", "openbsd/pkg/PLIST"]
+architectures = ["amd64", "aarch64"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
 
 [homebrew]
@@ -74,6 +88,7 @@ source_repository = "https://github.com/komawm/koma"
 source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 template = "homebrew/koma.rb.in"
+architectures = ["x86_64", "aarch64"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
 
 [development_prerelease]
@@ -91,7 +106,7 @@ release_assets = ["koma-<pkgver>-<pkgrel>-x86_64.pkg.tar.zst", "SHA256SUMS-archl
 
 [development_prerelease.matrix]
 workflow = ".github/workflows/cd-release-matrix.yml"
-channels = ["debian", "rpm", "alpine", "nix", "freebsd", "homebrew"]
+channels = ["debian", "rpm", "alpine", "nix", "freebsd", "openbsd", "homebrew"]
 publish_mode = "workflow_dispatch-with-release-environment"
 publish_input_default = false
 environment = "release"
@@ -99,18 +114,32 @@ required_secret = "PRODUCT_RELEASE_TOKEN"
 optional_channel_secrets = ["AUR_SSH_PRIVATE_KEY", "APT_GPG_PRIVATE_KEY", "COPR_CONFIG", "HOMEBREW_TAP_TOKEN", "CACHIX_AUTH_TOKEN"]
 release_assets = [
   "koma_<pkgver>-1_amd64.deb",
-  "SHA256SUMS-debian",
-  "PACKAGE-MANIFEST-debian.toml",
+  "SHA256SUMS-debian-amd64",
+  "PACKAGE-MANIFEST-debian-amd64.toml",
+  "koma_<pkgver>-1_arm64.deb",
+  "SHA256SUMS-debian-arm64",
+  "PACKAGE-MANIFEST-debian-arm64.toml",
   "koma-<pkgver>-1.<dist>.x86_64.rpm",
   "koma-<pkgver>-1.<dist>.src.rpm",
-  "SHA256SUMS-rpm",
-  "PACKAGE-MANIFEST-rpm.toml",
-  "koma-<pkgver>-r0.apk",
-  "SHA256SUMS-alpine",
-  "PACKAGE-MANIFEST-alpine.toml",
+  "SHA256SUMS-rpm-x86_64",
+  "PACKAGE-MANIFEST-rpm-x86_64.toml",
+  "koma-<pkgver>-1.<dist>.aarch64.rpm",
+  "SHA256SUMS-rpm-aarch64",
+  "PACKAGE-MANIFEST-rpm-aarch64.toml",
+  "koma-<pkgver>-r0.x86_64.apk",
+  "koma-doc-<pkgver>-r0.x86_64.apk",
+  "SHA256SUMS-alpine-x86_64",
+  "PACKAGE-MANIFEST-alpine-x86_64.toml",
+  "koma-<pkgver>-r0.aarch64.apk",
+  "koma-doc-<pkgver>-r0.aarch64.apk",
+  "SHA256SUMS-alpine-aarch64",
+  "PACKAGE-MANIFEST-alpine-aarch64.toml",
   "koma-<pkgver>.pkg",
-  "SHA256SUMS-freebsd",
-  "PACKAGE-MANIFEST-freebsd.toml",
+  "SHA256SUMS-freebsd-amd64",
+  "PACKAGE-MANIFEST-freebsd-amd64.toml",
+  "koma-<pkgver>-openbsd-amd64.tar.gz",
+  "SHA256SUMS-openbsd-amd64",
+  "PACKAGE-MANIFEST-openbsd-amd64.toml",
   "koma.nix",
   "flake.nix",
   "SHA256SUMS-nix",
