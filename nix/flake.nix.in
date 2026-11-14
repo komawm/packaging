@@ -1,0 +1,36 @@
+# UNACCEPTED integration template. Rendering does not approve build/publication.
+# Source tarball checksum recorded at render time: @SOURCE_SHA256@
+{
+  description = "Koma Wayland tiling compositor (@VERSION@, unaccepted packaging candidate)";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    koma-src = {
+      url = "github:komawm/koma/@SOURCE_COMMIT@";
+      flake = false;
+    };
+  };
+
+  outputs =
+    {
+      self,
+      nixpkgs,
+      koma-src,
+    }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+      komaPkg = pkgs.callPackage ./koma.nix {
+        src = koma-src;
+        lockFile = "${koma-src}/Cargo.lock";
+      };
+    in
+    {
+      packages.${system} = {
+        koma = komaPkg;
+        default = komaPkg;
+      };
+
+      checks.${system}.koma = komaPkg;
+    };
+}

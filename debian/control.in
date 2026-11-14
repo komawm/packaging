@@ -1,0 +1,45 @@
+# UNACCEPTED integration template. Rendering does not approve build/publication.
+Source: koma
+Section: x11
+Priority: optional
+Maintainer: Koma Packaging <packaging@komawm.org>
+Rules-Requires-Root: no
+Build-Depends:
+ debhelper-compat (= 13),
+ pkgconf | pkg-config,
+ libudev-dev,
+ libinput-dev,
+ libseat-dev,
+ libgbm-dev,
+ libegl-dev | libegl1-mesa-dev,
+ libgles-dev | libgles2-mesa-dev,
+ libwayland-dev,
+ libxkbcommon-dev,
+ libdbus-1-dev,
+ libfontconfig-dev | libfontconfig1-dev,
+ libdisplay-info-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/komawm/koma
+Vcs-Git: https://github.com/komawm/koma.git
+X-Koma-Source-Commit: @SOURCE_COMMIT@
+X-Koma-Source-Sha256: @SOURCE_SHA256@
+
+Package: koma
+Architecture: amd64
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ libegl1,
+ libgles2,
+ libwayland-client0,
+ libwayland-server0
+Recommends:
+ seatd | systemd-sysv,
+ xdg-desktop-portal-gnome | xdg-desktop-portal-gtk
+Suggests:
+ greetd,
+ xwayland-satellite
+Description: Wayland tiling compositor with explicit desktop automation interfaces
+ Koma (@VERSION@) is a Wayland tiling compositor built in Rust with explicit
+ desktop automation and IPC interfaces, shipping koma, komactl, koma-mcp,
+ and koma-overview.

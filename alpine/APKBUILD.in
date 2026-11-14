@@ -1,0 +1,58 @@
+# UNACCEPTED integration template. Rendering does not approve build/publication.
+# shellcheck shell=sh
+pkgname=koma
+pkgver='@VERSION@'
+pkgrel=0
+pkgdesc="Wayland tiling compositor with explicit desktop automation interfaces"
+url="https://github.com/komawm/koma"
+arch="x86_64"
+license="GPL-3.0-or-later"
+depends="dbus-libs libdrm libinput libxkbcommon mesa-egl mesa-gbm seatd-libs wayland-libs-client wayland-libs-server"
+makedepends="cargo rust pkgconf eudev-dev libinput-dev seatd-dev mesa-dev libdrm-dev wayland-dev libxkbcommon-dev dbus-dev fontconfig-dev libdisplay-info-dev"
+subpackages="$pkgname-doc"
+_source_commit='@SOURCE_COMMIT@'
+source="koma-${_source_commit}.tar.gz::https://github.com/komawm/koma/archive/${_source_commit}.tar.gz"
+sha256sums="@SOURCE_SHA256@  koma-${_source_commit}.tar.gz"
+builddir="$srcdir/koma-${_source_commit}"
+# Cargo.toml pins Git dependencies (phodopus, smithay) fetched during build/prepare.
+options="net"
+
+prepare() {
+	default_prepare
+	if [ ! -f Cargo.lock ]; then
+		printf '%s\n' 'Release build requires a reviewed, committed Cargo.lock' >&2
+		return 1
+	fi
+	cargo fetch --locked
+}
+
+build() {
+	# Dynamic linking against musl lets Smithay dlopen Mesa/EGL/Wayland drivers.
+	RUSTFLAGS="-C target-feature=-crt-static ${RUSTFLAGS:-}" \
+	cargo build --release --locked --package koma --package komactl \
+		--package koma-mcp --package koma-overview
+}
+
+check() {
+	./target/release/koma --version
+	./target/release/komactl --version
+}
+
+package() {
+	install -Dm755 target/release/koma "$pkgdir/usr/bin/koma"
+	install -Dm755 target/release/komactl "$pkgdir/usr/bin/komactl"
+	install -Dm755 target/release/koma-mcp "$pkgdir/usr/bin/koma-mcp"
+	install -Dm755 target/release/koma-overview "$pkgdir/usr/bin/koma-overview"
+	install -Dm755 resources/koma-session "$pkgdir/usr/bin/koma-session"
+	install -Dm644 resources/koma.desktop "$pkgdir/usr/share/wayland-sessions/koma.desktop"
+	# Omit systemd user units: Alpine uses OpenRC; koma-session supports direct fallback.
+	install -Dm644 resources/koma-portals.conf "$pkgdir/usr/share/xdg-desktop-portal/koma-portals.conf"
+	install -Dm644 resources/greetd-config.toml "$pkgdir/usr/share/doc/koma/examples/greetd-config.toml"
+	install -Dm644 examples/init.lua "$pkgdir/usr/share/doc/koma/examples/init.lua"
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/koma/LICENSE"
+}
+
+doc() {
+	mkdir -p "$subpkgdir/usr/share/doc"
+	mv "$pkgdir/usr/share/doc/$pkgname" "$subpkgdir/usr/share/doc/"
+}

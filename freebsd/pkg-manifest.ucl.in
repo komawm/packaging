@@ -1,0 +1,19 @@
+# UNACCEPTED integration manifest for staged pkg create (FreeBSD 15+ amd64).
+name: "koma"
+version: "@VERSION@"
+origin: "x11-wm/koma"
+comment: "Wayland tiling compositor with explicit desktop automation interfaces"
+www: "https://github.com/komawm/koma"
+maintainer: "packaging@komawm.org"
+prefix: "/usr/local"
+abi: "FreeBSD:15:amd64"
+licenses: ["GPLv3+"]
+licenselogic: "single"
+desc: "Koma is a Wayland tiling compositor built in Rust with explicit desktop automation and IPC interfaces."
+annotations: {
+  accepted: "false",
+  channel: "development-experimental",
+  source_commit: "@SOURCE_COMMIT@",
+  source_sha256: "@SOURCE_SHA256@",
+  cargo_flags: "--locked"
+}

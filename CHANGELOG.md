@@ -8,6 +8,24 @@ versions follow the Koma `v0.0.x` development series until `v0.1.0` acceptance.
 
 ### Added
 
+- Multi-distribution unaccepted packaging templates (`debian/`, `rpm/`,
+  `alpine/`, `nix/`, experimental `freebsd/`, and Linuxbrew `homebrew/`)
+  alongside `archlinux/PKGBUILD.in`, with metadata in `packaging.toml`.
+- Shared multi-distro template renderer (`scripts/render_template.py`, used by
+  `scripts/render_arch.py`), manifest/checksum generator
+  (`scripts/write_manifest.py`), guarded release asset stager
+  (`scripts/stage_release.py`), and shared tag/download scripts
+  (`scripts/resolve-tag.sh`, `scripts/download-source.sh`,
+  `scripts/ci-rpm-in-container.sh`, `scripts/ci-alpine-in-container.sh`).
+- Guarded multi-distro CD workflow (`.github/workflows/cd-release-matrix.yml`)
+  with `workflow_dispatch`-only triggers, `publish: false` default, digest-pinned
+  Fedora and Alpine containers, FreeBSD 15.1 opt-in VM packaging, and
+  `PRODUCT_RELEASE_TOKEN`-gated `release` environment uploads.
+- Expanded `scripts/verify.py` and `just check` coverage validating all distro
+  templates, smoke-rendering outputs, shellcheck across `alpine/` and
+  `scripts/`, and workflow security invariants across `.github/workflows/*.yml`.
+- Updated `docs/release.md` with matrix workflow documentation and GitHub Actions
+  Secrets / `release` environment variable scopes.
 - Headless QEMU/KVM Arch Linux VM harness (`vm/arch-vm.sh`, `vm/guest-install.sh`)
   and package smoke test (`vm/koma-smoke.sh`), `just vm-help`, shellcheck of
   `vm/*.sh` in `just check`, and [VM testing](docs/vm-testing.md) documentation
