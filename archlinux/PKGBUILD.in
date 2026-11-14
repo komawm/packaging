@@ -41,6 +41,10 @@ package() {
     install -Dm644 resources/koma.desktop "$pkgdir/usr/share/wayland-sessions/koma.desktop"
     install -Dm644 resources/koma.service "$pkgdir/usr/lib/systemd/user/koma.service"
     install -Dm644 resources/koma-shutdown.target "$pkgdir/usr/lib/systemd/user/koma-shutdown.target"
+    # Same location as Koma's resources/install-session.sh; XDG_CURRENT_DESKTOP=koma selects it.
+    install -Dm644 resources/koma-portals.conf "$pkgdir/usr/share/xdg-desktop-portal/koma-portals.conf"
+    # Example only: never overwrite a system greetd configuration from a package.
+    install -Dm644 resources/greetd-config.toml "$pkgdir/usr/share/doc/koma/examples/greetd-config.toml"
     install -Dm644 examples/init.lua "$pkgdir/usr/share/doc/koma/examples/init.lua"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/koma/LICENSE"
 }
