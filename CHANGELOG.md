@@ -6,8 +6,18 @@ versions follow the Koma `v0.0.x` development series until `v0.1.0` acceptance.
 
 ## [Unreleased]
 
+### Added
+
+- Headless QEMU/KVM Arch Linux VM harness (`vm/arch-vm.sh`, `vm/guest-install.sh`)
+  and package smoke test (`vm/koma-smoke.sh`), `just vm-help`, shellcheck of
+  `vm/*.sh` in `just check`, and [VM testing](docs/vm-testing.md) documentation
+  with the `v0.0.1` VM results.
+
 ### Fixed
 
+- Arch template installs `koma-portals.conf` to `/usr/share/xdg-desktop-portal/`
+  (matching Koma's session installer) and `greetd-config.toml` as a documentation
+  example; found by the `v0.0.1` VM run, not yet in a built package.
 - Arch template runtime dependencies now match the `v0.0.1` binaries (`seatd`
   provides `libseat`), and the build honors Koma's pinned `rust-toolchain.toml`
   through `rustup`; the empty `koma-debug` split package is disabled.
