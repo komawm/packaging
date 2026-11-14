@@ -7,8 +7,10 @@ pkgdesc='Wayland tiling compositor with explicit desktop automation interfaces'
 arch=('x86_64')
 url='https://github.com/komawm/koma'
 license=('GPL-3.0-or-later')
-depends=('libinput' 'libseat' 'libxkbcommon' 'libglvnd' 'mesa' 'wayland' 'dbus' 'fontconfig')
-makedepends=('cargo' 'pkgconf')
+# Runtime libraries derived from ldd of the v0.0.1 binaries (libseat is shipped by seatd).
+depends=('gcc-libs' 'glibc' 'libdrm' 'libinput' 'libxkbcommon' 'mesa' 'seatd' 'systemd-libs' 'libglvnd' 'wayland')
+makedepends=('rustup' 'pkgconf' 'libdisplay-info' 'dbus' 'fontconfig')
+optdepends=('xwayland-satellite: X11 client support' 'xdg-desktop-portal-gnome: screencast and file portals')
 _source_commit='@SOURCE_COMMIT@'
 source=("koma-${_source_commit}.tar.gz::https://github.com/komawm/koma/archive/${_source_commit}.tar.gz")
 sha256sums=('@SOURCE_SHA256@')
@@ -19,6 +21,10 @@ build() {
         printf '%s\n' 'Release build requires a reviewed, committed Cargo.lock' >&2
         return 1
     fi
+    # Honor the repository's pinned toolchain (rust-toolchain.toml) instead of the distro rust.
+    local channel
+    channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
+    rustup toolchain install --profile minimal "$channel"
     cargo build --release --locked --package koma --package komactl \
         --package koma-mcp --package koma-overview
 }

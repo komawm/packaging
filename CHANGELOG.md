@@ -4,6 +4,14 @@ All notable changes to the Koma packaging repository are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow the Koma `v0.0.x` development series until `v0.1.0` acceptance.
 
+## [Unreleased]
+
+### Fixed
+
+- Arch template runtime dependencies now match the `v0.0.1` binaries (`seatd`
+  provides `libseat`), and the build honors Koma's pinned `rust-toolchain.toml`
+  through `rustup`.
+
 ## [0.0.1] - 2026-11-14
 
 ### Added
