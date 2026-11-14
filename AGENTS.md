@@ -12,9 +12,13 @@ Run `just check`; install composed hooks with `just hooks-install` and never
 bypass them. Record durable local evidence in ignored `recording/` and
 disposable files in `/tmp/koma/`.
 
-Current initialization is local-only. No repository or distribution uploads,
-remote settings, tags, releases, issues, milestones, or secrets are authorized.
-Templates are unaccepted until real immutable source revisions, archive
+The `v0.0.x` development prerelease channel is authorized: the manual
+`cd-archlinux.yml` workflow may build a review-candidate Arch package and, only
+when dispatched with `publish=true` from `main` through the protected `release`
+environment, upload it to an existing product prerelease using the
+`PRODUCT_RELEASE_TOKEN` environment secret. Agents never set secret values,
+dispatch publication, or create tags/releases without explicit user intent.
+Templates remain unaccepted until real immutable source revisions, archive
 checksums, green product builds, and isolated install/upgrade/rollback evidence
 are available. Never use `SKIP`, fabricated checksums, a mutable branch, or a
 successful syntax check as release acceptance. Do not enable an automatic

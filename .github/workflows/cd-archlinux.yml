@@ -1,0 +1,284 @@
+name: cd-archlinux
+
+# Manually dispatched development-prerelease CD for Arch Linux packages.
+# Building never publishes. Publishing requires publish=true, the protected
+# `release` environment, and the PRODUCT_RELEASE_TOKEN environment secret.
+
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: Product repository under komawm
+        type: choice
+        options:
+          - koma
+        required: true
+        default: koma
+      tag:
+        description: Existing product release tag, for example v0.0.1
+        type: string
+        required: true
+      publish:
+        description: Upload the built package to the existing product release
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-archlinux-${{ inputs.product }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Arch Linux package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    container:
+      # archlinux:base-devel multi-arch index digest, resolved 2026-11-14.
+      image: archlinux:base-devel@sha256:fa2d4ce3310ddd90a4208e5168be8ad367da5129af1245f38fd2d803bcbe3239
+    env:
+      CONTAINER_IMAGE: archlinux:base-devel@sha256:fa2d4ce3310ddd90a4208e5168be8ad367da5129af1245f38fd2d803bcbe3239
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      OUT_DIR: /tmp/cd-out
+      BUILD_DIR: /tmp/cd-build
+    steps:
+      - name: Install build tooling
+        run: |
+          set -euo pipefail
+          pacman -Syu --noconfirm --needed git github-cli jq python namcap
+
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          case "$PRODUCT" in
+            koma) ;;
+            *) echo "::error::Unsupported product: $PRODUCT"; exit 1 ;;
+          esac
+          if [[ ! "$TAG" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag must match v0.MINOR.PATCH for development builds"
+            exit 1
+          fi
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Resolve tag to an immutable commit
+        run: |
+          set -euo pipefail
+          ref_json="$(gh api "repos/komawm/${PRODUCT}/git/ref/tags/${TAG}")"
+          obj_type="$(jq -r '.object.type' <<<"$ref_json")"
+          obj_sha="$(jq -r '.object.sha' <<<"$ref_json")"
+          # Dereference annotated (possibly nested) tag objects.
+          depth=0
+          while [[ "$obj_type" == "tag" ]]; do
+            depth=$((depth + 1))
+            if (( depth > 5 )); then
+              echo "::error::Tag nesting too deep"
+              exit 1
+            fi
+            tag_json="$(gh api "repos/komawm/${PRODUCT}/git/tags/${obj_sha}")"
+            obj_type="$(jq -r '.object.type' <<<"$tag_json")"
+            obj_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          done
+          if [[ "$obj_type" != "commit" || ! "$obj_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Tag $TAG does not resolve to a full commit (got $obj_type $obj_sha)"
+            exit 1
+          fi
+          echo "SOURCE_COMMIT=$obj_sha" >> "$GITHUB_ENV"
+          echo "Resolved $PRODUCT $TAG -> $obj_sha"
+
+      - name: Download source archive and compute checksum
+        run: |
+          set -euo pipefail
+          install -d "$BUILD_DIR" "$OUT_DIR"
+          archive="$BUILD_DIR/${PRODUCT}-${SOURCE_COMMIT}.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --output "$archive" \
+            "https://github.com/komawm/${PRODUCT}/archive/${SOURCE_COMMIT}.tar.gz"
+          source_sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
+          echo "SOURCE_SHA256=$source_sha256" >> "$GITHUB_ENV"
+          echo "Source archive sha256: $source_sha256"
+
+      - name: Render PKGBUILD
+        run: |
+          set -euo pipefail
+          python3 scripts/verify.py
+          python3 scripts/render_arch.py \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --version "$VERSION" \
+            --output "$BUILD_DIR/PKGBUILD"
+          bash -n "$BUILD_DIR/PKGBUILD"
+
+      - name: Build package as unprivileged user
+        run: |
+          set -euo pipefail
+          useradd --create-home --shell /bin/bash builder
+          printf '%s\n' 'builder ALL=(root) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/builder
+          chmod 0440 /etc/sudoers.d/builder
+          chown -R builder:builder "$BUILD_DIR"
+          cd "$BUILD_DIR"
+          sudo -u builder -- makepkg --syncdeps --noconfirm --cleanbuild
+          mapfile -t packages < <(sudo -u builder -- makepkg --packagelist)
+          if (( ${#packages[@]} != 1 )); then
+            echo "::error::Expected exactly one package, got ${#packages[@]}"
+            exit 1
+          fi
+          if [[ ! -f "${packages[0]}" ]]; then
+            echo "::error::Package ${packages[0]} was not produced"
+            exit 1
+          fi
+          cp "${packages[0]}" "$OUT_DIR/"
+          cp "$BUILD_DIR/PKGBUILD" "$OUT_DIR/PKGBUILD"
+          echo "PKG_FILE=$(basename "${packages[0]}")" >> "$GITHUB_ENV"
+
+      - name: Run namcap (informational)
+        run: |
+          set -uo pipefail
+          if command -v namcap >/dev/null 2>&1; then
+            {
+              echo "## namcap PKGBUILD"
+              namcap "$OUT_DIR/PKGBUILD" 2>&1
+              echo "## namcap $PKG_FILE"
+              namcap "$OUT_DIR/$PKG_FILE" 2>&1
+            } | tee "$OUT_DIR/namcap.log" || true
+          else
+            echo "namcap not available" | tee "$OUT_DIR/namcap.log"
+          fi
+
+      - name: Write checksums and manifest
+        run: |
+          set -euo pipefail
+          cd "$OUT_DIR"
+          pkg_sha256="$(sha256sum "$PKG_FILE" | cut -d' ' -f1)"
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          {
+            echo 'schema_version = 1'
+            echo 'distribution = "archlinux"'
+            echo 'channel = "development"'
+            echo 'accepted = false'
+            printf 'product = "%s"\n' "$PRODUCT"
+            printf 'repository = "https://github.com/komawm/%s"\n' "$PRODUCT"
+            printf 'tag = "%s"\n' "$TAG"
+            printf 'version = "%s"\n' "$VERSION"
+            printf 'commit = "%s"\n' "$SOURCE_COMMIT"
+            printf 'source_archive = "https://github.com/komawm/%s/archive/%s.tar.gz"\n' "$PRODUCT" "$SOURCE_COMMIT"
+            printf 'source_sha256 = "%s"\n' "$SOURCE_SHA256"
+            printf 'pkg_filename = "%s"\n' "$PKG_FILE"
+            printf 'pkg_sha256 = "%s"\n' "$pkg_sha256"
+            printf 'built_at = "%s"\n' "$built_at"
+            printf 'container_image = "%s"\n' "$CONTAINER_IMAGE"
+            printf 'container_digest = "%s"\n' "${CONTAINER_IMAGE##*@}"
+            printf 'packaging_commit = "%s"\n' "$GITHUB_SHA"
+            printf 'workflow_run = "%s/%s/actions/runs/%s"\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } > PACKAGE-MANIFEST.toml
+          python3 -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' PACKAGE-MANIFEST.toml
+          sha256sum "$PKG_FILE" > SHA256SUMS-archlinux
+          cat PACKAGE-MANIFEST.toml SHA256SUMS-archlinux
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: archlinux-package
+          path: /tmp/cd-out/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Upload to product release
+    if: ${{ inputs.publish }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+    env:
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ secrets.PRODUCT_RELEASE_TOKEN }}
+    steps:
+      - name: Require release credential
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::PRODUCT_RELEASE_TOKEN is not set in the 'release' environment of this repository."
+            echo "::error::Create a fine-grained token or GitHub App with Contents: write on komawm/${PRODUCT} and add it as an environment secret."
+            exit 1
+          fi
+
+      - name: Download build artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: archlinux-package
+          path: dist
+
+      - name: Verify artifact integrity and identity
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum --check --strict SHA256SUMS-archlinux
+          manifest_value() {
+            python3 -c 'import sys, tomllib; print(tomllib.load(open("PACKAGE-MANIFEST.toml", "rb"))[sys.argv[1]])' "$1"
+          }
+          if [[ "$(manifest_value product)" != "$PRODUCT" || "$(manifest_value tag)" != "$TAG" ]]; then
+            echo "::error::Manifest product/tag do not match the dispatch inputs"
+            exit 1
+          fi
+          pkg_file="$(manifest_value pkg_filename)"
+          if [[ "$(sha256sum "$pkg_file" | cut -d' ' -f1)" != "$(manifest_value pkg_sha256)" ]]; then
+            echo "::error::Package checksum does not match PACKAGE-MANIFEST.toml"
+            exit 1
+          fi
+          {
+            echo "PKG_FILE=$(manifest_value pkg_filename)"
+            echo "SOURCE_COMMIT=$(manifest_value commit)"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify target release
+        run: |
+          set -euo pipefail
+          release_tag="$(gh release view "$TAG" --repo "komawm/$PRODUCT" --json tagName --jq .tagName)"
+          if [[ "$release_tag" != "$TAG" ]]; then
+            echo "::error::Release komawm/$PRODUCT $TAG not found or tag mismatch (got '$release_tag')"
+            exit 1
+          fi
+          ref_json="$(gh api "repos/komawm/${PRODUCT}/git/ref/tags/${TAG}")"
+          obj_type="$(jq -r '.object.type' <<<"$ref_json")"
+          obj_sha="$(jq -r '.object.sha' <<<"$ref_json")"
+          depth=0
+          while [[ "$obj_type" == "tag" ]]; do
+            depth=$((depth + 1))
+            if (( depth > 5 )); then
+              echo "::error::Tag nesting too deep"
+              exit 1
+            fi
+            tag_json="$(gh api "repos/komawm/${PRODUCT}/git/tags/${obj_sha}")"
+            obj_type="$(jq -r '.object.type' <<<"$tag_json")"
+            obj_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          done
+          if [[ "$obj_sha" != "$SOURCE_COMMIT" ]]; then
+            echo "::error::Tag $TAG now resolves to $obj_sha, but the package was built from $SOURCE_COMMIT"
+            exit 1
+          fi
+
+      - name: Upload assets to product release
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          # Distribution-suffixed names avoid clobbering the product's own SHA256SUMS/manifest.
+          cp PACKAGE-MANIFEST.toml PACKAGE-MANIFEST-archlinux.toml
+          gh release upload "$TAG" \
+            "$PKG_FILE" SHA256SUMS-archlinux PACKAGE-MANIFEST-archlinux.toml \
+            --repo "komawm/$PRODUCT" --clobber
+          gh release view "$TAG" --repo "komawm/$PRODUCT" --json assets --jq '.assets[].name'
