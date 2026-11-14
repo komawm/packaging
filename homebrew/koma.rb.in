@@ -8,21 +8,26 @@ class Koma < Formula
   license "GPL-3.0-or-later"
 
   depends_on :linux
-  depends_on "pkgconf" => :build
-  depends_on "rust" => :build
-  depends_on "dbus"
-  depends_on "fontconfig"
-  depends_on "libdrm"
-  depends_on "libinput"
-  depends_on "libxkbcommon"
-  depends_on "mesa"
-  depends_on "seatd"
-  depends_on "systemd"
-  depends_on "wayland"
+
+  # Multi-arch Linuxbrew compatibility (x86_64 and aarch64/arm64).
+  on_linux do
+    depends_on "pkgconf" => :build
+    depends_on "rust" => :build
+    depends_on "dbus"
+    depends_on "fontconfig"
+    depends_on "libdrm"
+    depends_on "libinput"
+    depends_on "libxkbcommon"
+    depends_on "mesa"
+    depends_on "seatd"
+    depends_on "systemd"
+    depends_on "wayland"
+  end
 
   def install
     raise "Release build requires a reviewed, committed Cargo.lock" unless File.exist?("Cargo.lock")
 
+    # Clean CPU-agnostic release build for x86_64 and aarch64 Linuxbrew hosts.
     system "cargo", "build", "--release", "--locked",
            "--package", "koma",
            "--package", "komactl",

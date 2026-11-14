@@ -1,8 +1,8 @@
 # Alpine Linux template
 
 [APKBUILD.in](https://github.com/komawm/packaging/blob/main/alpine/APKBUILD.in)
-is an unaccepted Alpine Linux `x86_64` musl recipe built from an immutable
-[Koma](https://github.com/komawm/koma) source commit and checksum.
+is an unaccepted Alpine Linux `x86_64` and `aarch64` musl recipe built from an
+immutable [Koma](https://github.com/komawm/koma) source commit and checksum.
 
 ## Musl and OpenRC specifics
 

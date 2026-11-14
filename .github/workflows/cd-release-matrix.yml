@@ -29,6 +29,7 @@ on:
           - alpine
           - nix
           - freebsd
+          - openbsd
           - homebrew
         required: true
         default: linux
@@ -89,10 +90,18 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   build-debian:
-    name: Build Debian/Ubuntu (.deb)
+    name: Build Debian/Ubuntu (.deb, ${{ matrix.deb_arch }})
     if: ${{ inputs.channel == 'linux' || inputs.channel == 'all' || inputs.channel == 'debian' }}
     needs: prepare
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            deb_arch: amd64
+          - runner: ubuntu-24.04-arm
+            deb_arch: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
       contents: read
@@ -102,6 +111,7 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
       SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+      DEB_ARCH: ${{ matrix.deb_arch }}
       WORK_DIR: /tmp/deb-work
       OUT_DIR: /tmp/deb-out
     steps:
@@ -165,7 +175,7 @@ jobs:
           cp "${debs[0]}" "$OUT_DIR/"
           pkg_name="$(basename "${debs[0]}")"
           python3 scripts/write_manifest.py \
-            --distribution debian \
+            --distribution "debian-${DEB_ARCH}" \
             --product "$PRODUCT" \
             --tag "$TAG" \
             --version "$VERSION" \
@@ -179,16 +189,26 @@ jobs:
       - name: Upload Debian package artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: debian-package
+          name: debian-package-${{ matrix.deb_arch }}
           path: /tmp/deb-out/
           if-no-files-found: error
           retention-days: 14
 
   build-rpm:
-    name: Build Fedora RPM/SRPM
+    name: Build Fedora RPM (${{ matrix.rpm_arch }})
     if: ${{ inputs.channel == 'linux' || inputs.channel == 'all' || inputs.channel == 'rpm' }}
     needs: prepare
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            rpm_arch: x86_64
+            rpmbuild_flag: -ba
+          - runner: ubuntu-24.04-arm
+            rpm_arch: aarch64
+            rpmbuild_flag: -bb
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
       contents: read
@@ -200,6 +220,8 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
       SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+      RPM_ARCH: ${{ matrix.rpm_arch }}
+      RPMBUILD_FLAG: ${{ matrix.rpmbuild_flag }}
       IN_DIR: /tmp/rpm-in
       OUT_DIR: /tmp/rpm-out
     steps:
@@ -221,11 +243,12 @@ jobs:
             --version "$VERSION" \
             --output "$IN_DIR/koma.spec"
 
-      - name: Build RPM and SRPM in pinned Fedora container
+      - name: Build RPM in pinned Fedora container
         run: |
           set -euo pipefail
           docker run --rm \
             -e "SOURCE_COMMIT=$SOURCE_COMMIT" \
+            -e "RPMBUILD_FLAG=$RPMBUILD_FLAG" \
             -v "$IN_DIR:/in:ro" \
             -v "$OUT_DIR:/out" \
             -v "$GITHUB_WORKSPACE/scripts:/scripts:ro" \
@@ -241,7 +264,7 @@ jobs:
             exit 1
           fi
           python3 scripts/write_manifest.py \
-            --distribution rpm \
+            --distribution "rpm-${RPM_ARCH}" \
             --product "$PRODUCT" \
             --tag "$TAG" \
             --version "$VERSION" \
@@ -256,16 +279,24 @@ jobs:
       - name: Upload RPM artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: rpm-package
+          name: rpm-package-${{ matrix.rpm_arch }}
           path: /tmp/rpm-out/
           if-no-files-found: error
           retention-days: 14
 
   build-alpine:
-    name: Build Alpine musl (.apk)
+    name: Build Alpine musl (.apk, ${{ matrix.alpine_arch }})
     if: ${{ inputs.channel == 'linux' || inputs.channel == 'all' || inputs.channel == 'alpine' }}
     needs: prepare
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            alpine_arch: x86_64
+          - runner: ubuntu-24.04-arm
+            alpine_arch: aarch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
       contents: read
@@ -277,6 +308,7 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
       SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+      ALPINE_ARCH: ${{ matrix.alpine_arch }}
       IN_DIR: /tmp/alpine-in
       OUT_DIR: /tmp/alpine-out
     steps:
@@ -312,13 +344,20 @@ jobs:
       - name: Write Alpine checksums and manifest
         run: |
           set -euo pipefail
+          for apk in "$OUT_DIR"/*.apk; do
+            [[ -f "$apk" ]] || continue
+            case "$apk" in
+              *."$ALPINE_ARCH".apk) ;;
+              *) mv "$apk" "${apk%.apk}.${ALPINE_ARCH}.apk" ;;
+            esac
+          done
           mapfile -t apk_files < <(find "$OUT_DIR" -maxdepth 1 -type f -name '*.apk' -printf '%f\n' | sort)
           if (( ${#apk_files[@]} == 0 )); then
             echo "::error::No APK artifacts produced"
             exit 1
           fi
           python3 scripts/write_manifest.py \
-            --distribution alpine \
+            --distribution "alpine-${ALPINE_ARCH}" \
             --product "$PRODUCT" \
             --tag "$TAG" \
             --version "$VERSION" \
@@ -333,7 +372,7 @@ jobs:
       - name: Upload Alpine artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: alpine-package
+          name: alpine-package-${{ matrix.alpine_arch }}
           path: /tmp/alpine-out/
           if-no-files-found: error
           retention-days: 14
@@ -385,6 +424,13 @@ jobs:
             git commit -qm "Evaluate flake candidate"
             nix flake metadata
             nix eval --raw .#packages.x86_64-linux.koma.drvPath
+            printf '\n'
+            nix eval --raw .#packages.aarch64-linux.koma.drvPath
+            printf '\n'
+            nix eval --raw .#checks.x86_64-linux.koma.drvPath
+            printf '\n'
+            nix eval --raw .#checks.aarch64-linux.koma.drvPath
+            printf '\n'
             rm -rf .git flake.lock
           )
           python3 scripts/write_manifest.py \
@@ -476,6 +522,7 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
       SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+      FREEBSD_ARCH: amd64
     steps:
       - name: Check out packaging repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -499,6 +546,7 @@ jobs:
         uses: cross-platform-actions/action@82668f1fbd89d9c99487604f822cbf6716f124d3 # v1.7.0
         with:
           operating_system: freebsd
+          architecture: x86-64
           version: "15.1"
           memory: 6G
           cpu_count: 8
@@ -558,7 +606,7 @@ jobs:
             exit 1
           fi
           python3 scripts/write_manifest.py \
-            --distribution freebsd \
+            --distribution "freebsd-${FREEBSD_ARCH}" \
             --product "$PRODUCT" \
             --tag "$TAG" \
             --version "$VERSION" \
@@ -572,8 +620,199 @@ jobs:
       - name: Upload FreeBSD artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: freebsd-package
+          name: freebsd-package-${{ env.FREEBSD_ARCH }}
           path: _freebsd_stage/out/
+          if-no-files-found: error
+          retention-days: 14
+
+  validate-openbsd:
+    name: Validate OpenBSD 8.0 amd64 (experimental)
+    if: ${{ inputs.channel == 'all' || inputs.channel == 'openbsd' }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+      OPENBSD_ARCH: amd64
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Stage verified source for OpenBSD
+        run: |
+          set -euo pipefail
+          mkdir -p _openbsd_stage/out
+          bash scripts/download-source.sh \
+            "$PRODUCT" "$SOURCE_COMMIT" "_openbsd_stage/${PRODUCT}-${SOURCE_COMMIT}.tar.gz" "$SOURCE_SHA256" >/dev/null
+
+      - name: Start OpenBSD 8.0 VM
+        uses: cross-platform-actions/action@82668f1fbd89d9c99487604f822cbf6716f124d3 # v1.7.0
+        with:
+          operating_system: openbsd
+          architecture: x86-64
+          version: "8.0"
+          memory: 6G
+          cpu_count: 8
+
+      - name: Render OpenBSD port and build portable binaries inside guest
+        shell: cpa.sh {0}
+        env:
+          PRODUCT: ${{ inputs.product }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.prepare.outputs.commit }}
+          SOURCE_SHA256: ${{ needs.prepare.outputs.source_sha256 }}
+          OPENBSD_ARCH: amd64
+        run: |
+          set -eu
+          repo_root="$(pwd -P)"
+          actual="$(sha256 -q "$repo_root/_openbsd_stage/${PRODUCT}-${SOURCE_COMMIT}.tar.gz")"
+          if [ "$actual" != "$SOURCE_SHA256" ]; then
+            echo "Archive SHA-256 mismatch in OpenBSD guest: $actual" >&2
+            exit 1
+          fi
+
+          if [ "$(id -u)" -eq 0 ]; then
+            escalate=""
+          elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+            escalate="sudo"
+          elif command -v doas >/dev/null 2>&1 && [ -f /etc/doas.conf ] && doas -n true >/dev/null 2>&1; then
+            escalate="doas"
+          elif command -v sudo >/dev/null 2>&1; then
+            escalate="sudo"
+          else
+            echo "No configured privilege escalation helper (sudo/doas) in OpenBSD guest" >&2
+            exit 1
+          fi
+
+          $escalate pkg_add -I rust pkgconf
+          for opt_pkg in python%3 wayland libxkbcommon dbus fontconfig seatd libinput-openbsd libudev-openbsd; do
+            $escalate pkg_add -I "$opt_pkg" || true
+          done
+
+          py_bin="$(command -v python3 || true)"
+          if [ -z "$py_bin" ]; then
+            for candidate in /usr/local/bin/python3.[0-9] /usr/local/bin/python3.[0-9][0-9]; do
+              if [ -x "$candidate" ]; then
+                py_bin="$candidate"
+              fi
+            done
+          fi
+          if [ -z "$py_bin" ]; then
+            echo "python3 binary not found in OpenBSD guest" >&2
+            exit 1
+          fi
+
+          rm -rf "$repo_root/_openbsd_stage/port"
+          "$py_bin" "$repo_root/scripts/render_template.py" \
+            --distro openbsd \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --version "$VERSION" \
+            --output "$repo_root/_openbsd_stage/port"
+
+          test -f "$repo_root/_openbsd_stage/port/Makefile"
+          test -f "$repo_root/_openbsd_stage/port/distinfo"
+          test -f "$repo_root/_openbsd_stage/port/pkg/DESCR"
+          test -f "$repo_root/_openbsd_stage/port/pkg/PLIST"
+
+          rustc --version
+          cargo --version
+
+          work_dir="/tmp/koma-openbsd-work"
+          stage_root="/tmp/koma-openbsd-root/usr/local"
+          export CARGO_TARGET_DIR="/tmp/koma-openbsd-target"
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/X11R6/lib/pkgconfig"
+          rm -rf "$work_dir" /tmp/koma-openbsd-root "$CARGO_TARGET_DIR"
+          mkdir -p "$work_dir"
+          tar -xzf "$repo_root/_openbsd_stage/${PRODUCT}-${SOURCE_COMMIT}.tar.gz" -C "$work_dir"
+          src_dir="$work_dir/${PRODUCT}-${SOURCE_COMMIT}"
+          (
+            cd "$src_dir"
+            test -f Cargo.lock
+            min_ver="$(sed -n 's/^rust-version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+            cur_ver="$(rustc --version | awk '{print $2}' | cut -d- -f1)"
+            extra_flags=""
+            if [ -n "$min_ver" ] && awk -v cur="$cur_ver" -v req="$min_ver" '
+              BEGIN {
+                split(cur, c, "."); split(req, r, ".");
+                cv = (c[1] + 0) * 1000000 + (c[2] + 0) * 1000 + (c[3] + 0);
+                rv = (r[1] + 0) * 1000000 + (r[2] + 0) * 1000 + (r[3] + 0);
+                exit !(cv < rv);
+              }'; then
+              echo "::warning::OpenBSD rustc $cur_ver < rust-version $min_ver; passing --ignore-rust-version"
+              extra_flags="--ignore-rust-version"
+            fi
+            # shellcheck disable=SC2086
+            cargo build --release --locked $extra_flags -p koma-proto -p komactl -p koma-mcp
+            if pkg-config --exists wayland-client 2>/dev/null; then
+              # shellcheck disable=SC2086
+              cargo build --release --locked $extra_flags -p koma-overview
+            else
+              # shellcheck disable=SC2086
+              cargo build --release --locked $extra_flags -p koma-overview --no-default-features
+            fi
+            # shellcheck disable=SC2086
+            if ! cargo build --release --locked $extra_flags -p koma; then
+              echo "Notice: full koma compositor build did not succeed on OpenBSD; packaging portable crates only." >&2
+            fi
+          )
+
+          mkdir -p "$stage_root/bin" "$stage_root/share/wayland-sessions" \
+            "$stage_root/share/xdg-desktop-portal" "$stage_root/share/doc/koma/examples" \
+            "$stage_root/share/doc/koma/openbsd-port/pkg" "$stage_root/share/licenses/koma"
+          install -m 755 "$CARGO_TARGET_DIR/release/komactl" "$stage_root/bin/komactl"
+          install -m 755 "$CARGO_TARGET_DIR/release/koma-mcp" "$stage_root/bin/koma-mcp"
+          install -m 755 "$CARGO_TARGET_DIR/release/koma-overview" "$stage_root/bin/koma-overview"
+          if [ -x "$CARGO_TARGET_DIR/release/koma" ]; then
+            install -m 755 "$CARGO_TARGET_DIR/release/koma" "$stage_root/bin/koma"
+          fi
+          install -m 755 "$src_dir/resources/koma-session" "$stage_root/bin/koma-session"
+          install -m 644 "$src_dir/resources/koma.desktop" "$stage_root/share/wayland-sessions/koma.desktop"
+          install -m 644 "$src_dir/resources/koma-portals.conf" "$stage_root/share/xdg-desktop-portal/koma-portals.conf"
+          install -m 644 "$src_dir/resources/greetd-config.toml" "$stage_root/share/doc/koma/examples/greetd-config.toml"
+          install -m 644 "$src_dir/examples/init.lua" "$stage_root/share/doc/koma/examples/init.lua"
+          install -m 644 "$src_dir/LICENSE" "$stage_root/share/licenses/koma/LICENSE"
+          install -m 644 "$repo_root/_openbsd_stage/port/Makefile" "$stage_root/share/doc/koma/openbsd-port/Makefile"
+          install -m 644 "$repo_root/_openbsd_stage/port/distinfo" "$stage_root/share/doc/koma/openbsd-port/distinfo"
+          install -m 644 "$repo_root/_openbsd_stage/port/pkg/DESCR" "$stage_root/share/doc/koma/openbsd-port/pkg/DESCR"
+          install -m 644 "$repo_root/_openbsd_stage/port/pkg/PLIST" "$stage_root/share/doc/koma/openbsd-port/pkg/PLIST"
+
+          tar -czf "$repo_root/_openbsd_stage/out/koma-${VERSION}-openbsd-${OPENBSD_ARCH}.tar.gz" \
+            -C /tmp/koma-openbsd-root usr/local
+
+      - name: Write OpenBSD checksums and manifest
+        run: |
+          set -euo pipefail
+          mapfile -t openbsd_files < <(find _openbsd_stage/out -maxdepth 1 -type f -name '*.tar.gz' -printf '%f\n' | sort)
+          if (( ${#openbsd_files[@]} != 1 )); then
+            echo "::error::Expected one OpenBSD .tar.gz artifact, found ${#openbsd_files[@]}"
+            exit 1
+          fi
+          python3 scripts/write_manifest.py \
+            --distribution "openbsd-${OPENBSD_ARCH}" \
+            --product "$PRODUCT" \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --output-dir _openbsd_stage/out \
+            --files "${openbsd_files[@]}" \
+            --packaging-commit "$GITHUB_SHA" \
+            --workflow-run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Upload OpenBSD artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: openbsd-package-${{ env.OPENBSD_ARCH }}
+          path: _openbsd_stage/out/
           if-no-files-found: error
           retention-days: 14
 
@@ -588,6 +827,7 @@ jobs:
       - validate-nix
       - validate-homebrew
       - build-freebsd
+      - validate-openbsd
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: release

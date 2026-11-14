@@ -2,8 +2,9 @@
 
 The [Debian template directory](https://github.com/komawm/packaging/tree/main/debian)
 (`control.in`, `rules.in`, `changelog.in`, `copyright`, and `source/format`)
-is an unaccepted integration template for building `koma_<version>-1_amd64.deb`
-packages from an immutable [Koma](https://github.com/komawm/koma) source archive.
+is an unaccepted integration template for building `amd64` and `arm64`
+(`koma_<version>-1_<arch>.deb`) packages from an immutable
+[Koma](https://github.com/komawm/koma) source archive.
 
 ## Toolchain and dependency notes
 

@@ -2,7 +2,8 @@
 
 The [FreeBSD template directory](https://github.com/komawm/packaging/tree/main/freebsd)
 provides `Makefile.in`, `distinfo.in`, `pkg-manifest.ucl.in`, `pkg-descr`, and
-`pkg-plist` targeting **FreeBSD 15+ `amd64`**.
+`pkg-plist` targeting **FreeBSD 15+ `amd64` and `aarch64`** (with CI VM
+packaging currently targeting `15.1 amd64`).
 
 ## Portability and support status
 

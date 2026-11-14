@@ -1,4 +1,4 @@
-# UNACCEPTED integration manifest for staged pkg create (FreeBSD 15+ amd64).
+# UNACCEPTED integration manifest for staged pkg create (FreeBSD 15+ amd64 and aarch64).
 name: "koma"
 version: "@VERSION@"
 origin: "x11-wm/koma"
@@ -6,6 +6,7 @@ comment: "Wayland tiling compositor with explicit desktop automation interfaces"
 www: "https://github.com/komawm/koma"
 maintainer: "packaging@komawm.org"
 prefix: "/usr/local"
+# Default FreeBSD 15+ ABI targets amd64; replace with FreeBSD:15:aarch64 on arm64.
 abi: "FreeBSD:15:amd64"
 licenses: ["GPLv3+"]
 licenselogic: "single"

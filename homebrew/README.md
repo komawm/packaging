@@ -8,7 +8,8 @@ is an unaccepted Homebrew formula template for
 
 Koma's compositor backend targets Linux DRM/KMS, `libinput`, `seatd`, and
 Wayland/Mesa (`depends_on :linux`). It is intended for Homebrew on Linux
-(Linuxbrew); macOS is not a compositor target.
+(Linuxbrew) on `x86_64` and `aarch64` (`arm64`) hosts; macOS is not a compositor
+target.
 
 Building from source requires Rust `>= 1.100.0` (edition `2024`, pinned in
 `rust-toolchain.toml`) and a committed `Cargo.lock` (`--locked`).

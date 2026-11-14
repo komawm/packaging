@@ -4,6 +4,14 @@
 set -euo pipefail
 
 : "${SOURCE_COMMIT:?SOURCE_COMMIT must be set}"
+rpmbuild_flag="${RPMBUILD_FLAG:--ba}"
+case "$rpmbuild_flag" in
+    -ba|-bb) ;;
+    *)
+        echo "Unsupported RPMBUILD_FLAG: $rpmbuild_flag" >&2
+        exit 1
+        ;;
+esac
 
 dnf install -y --setopt=install_weak_deps=False \
     rpm-build rustup pkgconf-pkg-config systemd-devel libinput-devel \
@@ -19,7 +27,7 @@ cp "/in/koma-${SOURCE_COMMIT}.tar.gz" "$rpmtop/SOURCES/koma-${SOURCE_COMMIT}.tar
 chown -R builder:builder /home/builder
 
 su -s /bin/bash builder -c \
-    "rpmbuild --define '_topdir $rpmtop' -ba '$rpmtop/SPECS/koma.spec'"
+    "rpmbuild --define '_topdir $rpmtop' ${rpmbuild_flag} '$rpmtop/SPECS/koma.spec'"
 
 find "$rpmtop/RPMS" "$rpmtop/SRPMS" -type f -name '*.rpm' -exec cp {} /out/ \;
 cp "$rpmtop/SPECS/koma.spec" /out/koma.spec

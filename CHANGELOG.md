@@ -8,6 +8,16 @@ versions follow the Koma `v0.0.x` development series until `v0.1.0` acceptance.
 
 ### Added
 
+- Multi-architecture (`x86_64` and `aarch64`/`arm64`) support across packaging
+  templates (`archlinux`, `debian`, `rpm`, `alpine`, `freebsd`, `nix`, `homebrew`),
+  matrix legs on `ubuntu-24.04` + `ubuntu-24.04-arm` in
+  `.github/workflows/cd-release-matrix.yml` with per-arch manifest/artifact
+  isolation, and dual-system `x86_64-linux` / `aarch64-linux` evaluation in
+  `nix/flake.nix.in`.
+- Experimental OpenBSD 8+ ports template (`openbsd/Makefile.in`,
+  `openbsd/distinfo.in`, `openbsd/pkg/DESCR`, `openbsd/pkg/PLIST`,
+  `openbsd/README.md`), renderer/verifier registration, and OpenBSD 8.0 VM
+  validation job (`validate-openbsd`) in `.github/workflows/cd-release-matrix.yml`.
 - Multi-distribution unaccepted packaging templates (`debian/`, `rpm/`,
   `alpine/`, `nix/`, experimental `freebsd/`, and Linuxbrew `homebrew/`)
   alongside `archlinux/PKGBUILD.in`, with metadata in `packaging.toml`.

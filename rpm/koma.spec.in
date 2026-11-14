@@ -8,7 +8,7 @@ Release:        1%{?dist}
 Summary:        Wayland tiling compositor with explicit desktop automation interfaces
 License:        GPL-3.0-or-later
 URL:            https://github.com/komawm/koma
-ExclusiveArch:  x86_64
+ExclusiveArch:  x86_64 aarch64
 Source0:        https://github.com/komawm/koma/archive/%{source_commit}.tar.gz#/koma-%{source_commit}.tar.gz
 
 BuildRequires:  dbus-devel

@@ -24,7 +24,7 @@ X-Koma-Source-Commit: @SOURCE_COMMIT@
 X-Koma-Source-Sha256: @SOURCE_SHA256@
 
 Package: koma
-Architecture: amd64
+Architecture: amd64 arm64
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},

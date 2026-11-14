@@ -76,7 +76,7 @@ and SHA-256, build time, container digest, packaging commit, run URL).
 | --- | --- |
 | `product` | Product repository under `komawm` (`koma`) |
 | `tag` | Existing product tag matching `v0.MINOR.PATCH` |
-| `channel` | Target channel group: `linux` (default), `all` (includes experimental `freebsd`), or a single channel (`debian`, `rpm`, `alpine`, `nix`, `freebsd`, `homebrew`) |
+| `channel` | Target channel group: `linux` (default), `all` (includes experimental `freebsd` and `openbsd`), or a single channel (`debian`, `rpm`, `alpine`, `nix`, `freebsd`, `openbsd`, `homebrew`) |
 | `publish` | `false` (default) builds/validates only; `true` runs `publish` under `environment: release` |
 
 The `prepare` job resolves `tag` to an immutable 40-character commit via
@@ -84,26 +84,39 @@ The `prepare` job resolves `tag` to an immutable 40-character commit via
 `scripts/download-source.sh`, and exports `version`, `commit`, and
 `source_sha256` to channel jobs:
 
-- `build-debian` (`ubuntu-24.04`): installs C/Wayland apt deps and the pinned
-  `rust-toolchain.toml` Rust compiler, renders `debian/`, builds unsigned `.deb`
-  with `dpkg-buildpackage -b -uc -us`, inspects via `dpkg-deb`, and writes
-  `SHA256SUMS-debian` + `PACKAGE-MANIFEST.toml`.
-- `build-rpm` (`ubuntu-24.04` -> digest-pinned `fedora:43` container): renders
-  `rpm/koma.spec.in` and runs `scripts/ci-rpm-in-container.sh` as unprivileged
-  `builder` to produce `.x86_64.rpm` and `.src.rpm`.
-- `build-alpine` (`ubuntu-24.04` -> digest-pinned `alpine:edge` container):
-  renders `alpine/APKBUILD.in` and runs `scripts/ci-alpine-in-container.sh` as
-  unprivileged `builder` (`abuild -r`) with `-C target-feature=-crt-static`.
+- `build-debian` (`ubuntu-24.04` `amd64` and `ubuntu-24.04-arm` `arm64`):
+  installs C/Wayland apt deps and the pinned `rust-toolchain.toml` Rust
+  compiler, renders `debian/`, builds unsigned `.deb` with
+  `dpkg-buildpackage -b -uc -us`, inspects via `dpkg-deb`, and writes
+  `SHA256SUMS-debian-<arch>` + `PACKAGE-MANIFEST.toml`.
+- `build-rpm` (`ubuntu-24.04` `x86_64` and `ubuntu-24.04-arm` `aarch64` ->
+  multi-arch digest-pinned `fedora:43` container): renders `rpm/koma.spec.in`
+  and runs `scripts/ci-rpm-in-container.sh` as unprivileged `builder` (`-ba` on
+  `x86_64` for binary + `.src.rpm`, `-bb` on `aarch64` for binary `.aarch64.rpm`).
+- `build-alpine` (`ubuntu-24.04` `x86_64` and `ubuntu-24.04-arm` `aarch64` ->
+  multi-arch digest-pinned `alpine:edge` container): renders `alpine/APKBUILD.in`,
+  runs `scripts/ci-alpine-in-container.sh` as unprivileged `builder`
+  (`abuild -r`) with `-C target-feature=-crt-static`, and suffixes `.apk`
+  outputs by architecture (`<pkg>.<arch>.apk`).
 - `validate-nix` (`ubuntu-24.04`): renders `nix/`, parses `.nix` files with
   `nix-instantiate --parse`, checks `nix flake metadata`, and evaluates the
-  derivation graph (`nix eval .#packages.x86_64-linux.koma.drvPath`).
+  derivation graph for both `x86_64-linux` and `aarch64-linux`
+  (`packages.<system>.koma.drvPath` and `checks.<system>.koma.drvPath`).
 - `validate-homebrew` (`ubuntu-24.04`): renders `homebrew/koma.rb.in`, runs
   `ruby -c`, and runs `brew style` when Linuxbrew is present.
 - `build-freebsd` (`ubuntu-24.04` -> `cross-platform-actions/action` FreeBSD
   `15.1` `amd64` VM, opt-in via `channel=all` or `channel=freebsd`): builds with
   `cargo build --release --locked` and stages a `.pkg` archive with
-  `pkg create -M pkg-manifest.ucl`. FreeBSD runtime behavior remains
-  unverified/experimental (`runtime_verified = false`).
+  `pkg create -M pkg-manifest.ucl`, writing `SHA256SUMS-freebsd-amd64`. FreeBSD
+  runtime behavior remains unverified/experimental (`runtime_verified = false`).
+- `validate-openbsd` (`ubuntu-24.04` -> `cross-platform-actions/action` OpenBSD
+  `8.0` `amd64` VM, opt-in via `channel=all` or `channel=openbsd`): renders the
+  OpenBSD port templates inside the OpenBSD guest, verifies the source checksum
+  and `Cargo.lock`, builds portable workspace crates (`koma-proto`, `komactl`,
+  `koma-mcp`, `koma-overview`, plus `koma` when all OpenBSD Wayland/seat ports
+  build), and packages an experimental tarball with `SHA256SUMS-openbsd-amd64`.
+  OpenBSD runtime behavior remains unverified/experimental
+  (`runtime_verified = false`).
 
 Each channel writes `SHA256SUMS-<distro>` and `PACKAGE-MANIFEST.toml` through
 `scripts/write_manifest.py`.

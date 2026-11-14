@@ -1,0 +1,10 @@
+@bin bin/koma
+@bin bin/komactl
+@bin bin/koma-mcp
+@bin bin/koma-overview
+bin/koma-session
+share/wayland-sessions/koma.desktop
+share/xdg-desktop-portal/koma-portals.conf
+share/doc/koma/examples/greetd-config.toml
+share/doc/koma/examples/init.lua
+share/licenses/koma/LICENSE

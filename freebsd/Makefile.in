@@ -17,8 +17,8 @@ WWW=		https://github.com/komawm/koma
 LICENSE=	GPLv3+
 LICENSE_FILE=	${WRKSRC}/LICENSE
 
-ONLY_FOR_ARCHS=	amd64
-ONLY_FOR_ARCHS_REASON=	Candidate packaging target covers FreeBSD 15+ amd64 only
+ONLY_FOR_ARCHS=	amd64 aarch64
+ONLY_FOR_ARCHS_REASON=	Candidate packaging target covers FreeBSD 15+ amd64 and aarch64
 
 LIB_DEPENDS=	libdbus-1.so:devel/dbus \
 		libdrm.so:graphics/libdrm \
