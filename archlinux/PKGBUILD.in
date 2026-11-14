@@ -1,0 +1,38 @@
+# UNACCEPTED integration template. Rendering does not approve build/publication.
+# shellcheck shell=bash
+pkgname=koma
+pkgver='@VERSION@'
+pkgrel=1
+pkgdesc='Wayland tiling compositor with explicit desktop automation interfaces'
+arch=('x86_64')
+url='https://github.com/komawm/koma'
+license=('GPL-3.0-or-later')
+depends=('libinput' 'libseat' 'libxkbcommon' 'libglvnd' 'mesa' 'wayland' 'dbus' 'fontconfig')
+makedepends=('cargo' 'pkgconf')
+_source_commit='@SOURCE_COMMIT@'
+source=("koma-${_source_commit}.tar.gz::https://github.com/komawm/koma/archive/${_source_commit}.tar.gz")
+sha256sums=('@SOURCE_SHA256@')
+
+build() {
+    cd "koma-${_source_commit}" || return 1
+    if [[ ! -f Cargo.lock ]]; then
+        printf '%s\n' 'Release build requires a reviewed, committed Cargo.lock' >&2
+        return 1
+    fi
+    cargo build --release --locked --package koma --package komactl \
+        --package koma-mcp --package koma-overview
+}
+
+package() {
+    cd "koma-${_source_commit}" || return 1
+    install -Dm755 target/release/koma "$pkgdir/usr/bin/koma"
+    install -Dm755 target/release/komactl "$pkgdir/usr/bin/komactl"
+    install -Dm755 target/release/koma-mcp "$pkgdir/usr/bin/koma-mcp"
+    install -Dm755 target/release/koma-overview "$pkgdir/usr/bin/koma-overview"
+    install -Dm755 resources/koma-session "$pkgdir/usr/bin/koma-session"
+    install -Dm644 resources/koma.desktop "$pkgdir/usr/share/wayland-sessions/koma.desktop"
+    install -Dm644 resources/koma.service "$pkgdir/usr/lib/systemd/user/koma.service"
+    install -Dm644 resources/koma-shutdown.target "$pkgdir/usr/lib/systemd/user/koma-shutdown.target"
+    install -Dm644 examples/init.lua "$pkgdir/usr/share/doc/koma/examples/init.lua"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/koma/LICENSE"
+}

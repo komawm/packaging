@@ -1,0 +1,34 @@
+# Packaging repository guidance
+
+This is the distribution packaging and CD repository for
+[komawm](https://github.com/komawm). Read the [workspace guidance](https://github.com/komawm/.github/blob/main/workspace/AGENTS.md),
+the [canonical design corpus](https://github.com/komawm/docs), and the
+[release runbook](https://github.com/komawm/packaging/blob/main/docs/release.md).
+
+Use this repository's CarryCtx project, `PKG` task prefix, named sessions,
+scoped tasks, and checkpoints. Read task state and inspect evidence before
+completion. Use independent worktrees after the first commit for parallel work.
+Run `just check`; install composed hooks with `just hooks-install` and never
+bypass them. Record durable local evidence in ignored `recording/` and
+disposable files in `/tmp/koma/`.
+
+Current initialization is local-only. No repository or distribution uploads,
+remote settings, tags, releases, issues, milestones, or secrets are authorized.
+Templates are unaccepted until real immutable source revisions, archive
+checksums, green product builds, and isolated install/upgrade/rollback evidence
+are available. Never use `SKIP`, fabricated checksums, a mutable branch, or a
+successful syntax check as release acceptance. Do not enable an automatic
+release workflow over a failing product baseline.
+
+Keep packaging infrastructure MIT licensed and preserve product GPL notices and
+source-offer obligations separately. Do not copy external Phodopus source or
+change its shared checkout. Treat Jiku's current skeleton as unimplemented;
+package it only after an accepted runtime exists. Version development as
+`v0.0.x` and require explicit platform/backend acceptance for `v0.1.0`.
+
+Keep checks local; this repository does not require generic CI, CodeQL, bot
+review, or an Issue/PR workflow. Packaging owns CD preparation. After explicit
+release authorization, upload Koma artifacts to `komawm/koma` GitHub Releases
+and accepted future Jiku artifacts to `komawm/jiku` Releases. Scope credentials
+to the target product repository and keep their values out of files. A packaging
+workflow's built-in GITHUB_TOKEN cannot write another repository's Releases.

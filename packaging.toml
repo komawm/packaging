@@ -1,0 +1,26 @@
+schema_version = 1
+development_version = "0.0.1"
+accepted = false
+remote_changes_enabled = false
+publish_enabled = false
+infrastructure_license = "MIT"
+product_license = "GPL-3.0-or-later"
+
+[archlinux]
+status = "template-unaccepted"
+source_repository = "https://github.com/komawm/koma"
+source_revision_required = "full-40-character-commit"
+source_checksum_required = "sha256"
+template = "archlinux/PKGBUILD.in"
+packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
+
+[jiku]
+status = "pending-runtime-implementation-and-acceptance"
+
+[release]
+first_accepted_version = "0.1.0"
+required_evidence = ["Green pinned product build", "Real source archive checksum", "License and source notices", "Isolated install and removal", "Upgrade and rollback", "Selected platform/backend matrix", "Independent review"]
+
+[release.targets]
+koma = "komawm/koma"
+jiku = "komawm/jiku"

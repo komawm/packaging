@@ -1,0 +1,8 @@
+[repo]
+name = "packaging"
+kind = "tooling"
+lang = "bash/python"
+role = "Distribution packaging and guarded release delivery"
+owner = "koma"
+repository = "https://github.com/komawm/packaging"
+docs = "https://github.com/komawm/packaging/tree/main/docs"

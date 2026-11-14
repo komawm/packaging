@@ -1,0 +1,9 @@
+.carryctx/config.local.toml
+.worktrees/
+recording/
+__pycache__/
+*.pyc
+/archlinux/PKGBUILD
+*.pkg.tar.*
+*.qcow2
+*.iso
