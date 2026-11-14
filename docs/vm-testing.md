@@ -1,10 +1,13 @@
 # Isolated VM testing
 
 `vm/arch-vm.sh` and `vm/koma-smoke.sh` exercise a built Koma package inside a
-disposable QEMU/KVM Arch Linux guest. They implement step 5 of the
+disposable QEMU/KVM Arch Linux guest, while `vm/freebsd-vm.sh` manages a
+separate FreeBSD 15.1 QEMU/KVM guest for cross-platform compilation and unit-test
+verification (`cargo check` / `cargo test`). Together they support step 5 of the
 [release runbook](release.md) (install, launch, shutdown, removal, reinstall,
-rollback) without touching the host desktop session, GPU binding, boot
-configuration, system services, or device permissions.
+rollback, and Wayland protocol checks) without touching the host desktop
+session, GPU binding, boot configuration, system services, or device
+permissions.
 
 The VM defaults to headless (`VM_DISPLAY=none`): serial console to a log file, a QMP
 control socket, and an optional VNC server bound to `127.0.0.1` (`VM_VNC`). Set
@@ -20,7 +23,9 @@ requires root on the host.
 - OVMF firmware (`edk2-ovmf`: `/usr/share/edk2/x64/OVMF_CODE.4m.fd`, `OVMF_VARS.4m.fd`)
 - `qemu-img`, `ssh`, `scp`, `ssh-keygen`, `python3` (QMP client)
 - `mkfs.fat` (dosfstools) and `mcopy` (mtools) for the NoCloud seed image
-- An Arch Linux installer ISO in the read-only collection named by `ISO_PATH`
+- An Arch Linux installer ISO (`archlinux-*-x86_64.iso`) and/or a FreeBSD
+  installer ISO (`FreeBSD-*-amd64-disc1.iso`) in the read-only collection named
+  by `ISO_PATH` (the scripts never write inside `ISO_PATH`)
 - Optional host display / VNC / Virgl packages on Arch Linux:
   - `qemu-ui-gtk`, `qemu-ui-sdl`, `qemu-ui-opengl` (local QEMU window with `VM_DISPLAY=gtk,gl=on` or `sdl,gl=on`)
   - `qemu-ui-egl-headless` + `tigervnc` (`vncviewer`): headless host GPU Virgl (`VM_GPU=virtio-vga-gl VM_DISPLAY=egl-headless VM_VNC=1`) viewed via `vncviewer 127.0.0.1:5901`
@@ -73,7 +78,7 @@ vm/arch-vm.sh snapshot apply clean-base   # roll back to the clean install
 `install` boots the ISO with the seed attached; archiso's cloud-init installs the
 ephemeral key for root. `vm/guest-install.sh` then partitions `/dev/vda` (1 GiB
 ESP + ext4), runs `pacstrap` (base, linux, openssh, sudo, foot, wayland-utils,
-ttf-dejavu, grim, namcap), installs systemd-boot, enables systemd-networkd,
+ttf-dejavu, grim, python, namcap), installs systemd-boot, enables systemd-networkd,
 systemd-resolved and sshd, creates the `tester` user (groups `wheel`, `video`,
 `input`) and configures tty1 autologin for it. Koma's own runtime dependencies
 are deliberately not preinstalled so that `pacman -U` must resolve them.
@@ -81,19 +86,78 @@ are deliberately not preinstalled so that `pacman -U` must resolve them.
 The `tty` smoke step launches `koma --tty` from tester's tty1 autologin shell, so
 a real logind session owns the active VT and libseat uses the logind backend. It
 records the Wayland globals (`wayland-info`), spawns `foot`, queries the admin
-IPC (`komactl config-status`, `komactl inventory`), and takes screendumps.
+IPC (`komactl config-status`, `komactl inventory`), captures `komactl capture`,
+and runs the protocol completeness suite (also runnable standalone via
+`vm/koma-smoke.sh protocols`):
+
+1. **Client log and globals check**: asserts `zwlr_layer_shell_v1`,
+   `zwlr_screencopy_manager_v1`, and `ext_session_lock_manager_v1` are
+   advertised and fails if `/tmp/foot.log` reports missing Wayland protocols or
+   fatal client errors.
+2. **Unlocked `wlr-screencopy` (`grim`)**: captures a PNG via `grim`, verifies
+   non-black pixel content with `vm/wayland-probe.py check-png`, and saves it to
+   `$VM_EVIDENCE_DIR`.
+3. **`wlr-layer-shell` `exclusive_zone`**: maps a top bar (`height=64`,
+   `exclusive_zone=64`) using `vm/wayland-probe.py layer-panel`, verifies that
+   `komactl inventory` tiled window geometry shrinks vertically, captures a
+   screendump, closes the bar, and verifies the workarea restores.
+4. **`ext-session-lock-v1` isolation**: acquires a session lock via
+   `vm/wayland-probe.py session-lock`, captures QEMU and `grim` outputs while
+   locked, verifies normal windows stay hidden and `grim` either fails or
+   returns a masked frame, unlocks cleanly via `SIGUSR1` (`unlock_and_destroy`),
+   and re-verifies `grim` and `komactl inventory` restoration.
+
 Every QEMU invocation and snapshot operation is appended to
 `qemu-commands.log` in the evidence directory; each smoke step writes
 `<step>.log` and a line in `results.tsv`.
+
+## FreeBSD 15.1 harness (`vm/freebsd-vm.sh`)
+
+`vm/freebsd-vm.sh` mirrors `vm/arch-vm.sh` with separate defaults so Arch and
+FreeBSD guests can coexist side by side:
+
+| Item | Default |
+| --- | --- |
+| Installer ISO | `$ISO_PATH/FreeBSD-15.1-RELEASE-amd64-disc1.iso` or newest `$ISO_PATH/FreeBSD-*-amd64-disc1.iso` |
+| Disk, OVMF vars, FAT16 seed | `$KOMA_WORKSPACE/recording/vm/freebsd-koma/` (`VM_DISK_SIZE=32G`, `VM_FS=zfs` or `ufs`) |
+| Guest resources | `4` vCPUs (`VM_CPUS`), `6G` RAM (`VM_MEM`), auto KVM/TCG detection (`VM_ACCEL=auto`) |
+| Logs and evidence | `$KOMA_WORKSPACE/recording/<date>/vm-freebsd-koma/` (`VM_EVIDENCE_DIR`) |
+| Guest SSH | `127.0.0.1:2223` forwarded to guest port 22 (`VM_SSH_PORT`) |
+| Guest network | QEMU user networking; optional `VM_GUEST_PROXY` forwarded into guest SSH runs |
+
+`install` builds a 16 MiB FAT16 `bsdinstall` seed disk (`mkfs.fat` + `mcopy`,
+no host `xorriso` or Tcl `expect` required), drives FreeBSD `loader.efi` into
+single-user serial mode (`boot -s`) over a local Unix serial socket, runs
+non-interactive `bsdinstall script` from the ISO distribution sets, boots once to
+run `provision` (`pkgconf`, `git`, `curl`, `ca_root_nss`, `sudo`, `dbus`,
+`libdrm`, `fontconfig`, `libinput`, `seatd`, `libudev-devd`, `wayland`,
+`libxkbcommon`, `mesa-libs`, `rust`), and powers off cleanly.
+
+```bash
+export ISO_PATH=/path/to/read-only/isos
+vm/freebsd-vm.sh seed                      # build FAT16 seed image only
+vm/freebsd-vm.sh install                   # unattended ZFS (or VM_FS=ufs) install + pkg provision
+vm/freebsd-vm.sh snapshot save clean-base  # offline qcow2 snapshot
+vm/freebsd-vm.sh boot && vm/freebsd-vm.sh wait-ssh
+vm/freebsd-vm.sh sync-repo                 # copy clean Koma tree to guest:/root/koma-src
+vm/freebsd-vm.sh koma-check                # run cargo check --workspace --all-targets --locked & cargo test
+vm/freebsd-vm.sh stop
+```
+
+If FreeBSD `pkg`'s `rust` package is older than `koma/rust-toolchain.toml`,
+`koma-check` provisions the required toolchain with `rustup` before running the
+locked workspace checks.
 
 ## What a VM run does and does not establish
 
 A pass shows that the package installs and resolves dependencies on a current
 Arch system, that the binaries run, that the files are removed cleanly, and
-what the compositor does on an emulated KMS device under a logind seat. It does
-not prove physical DRM/KMS hardware support, GPU acceleration, multi-GPU,
-physical input devices, hotplug, suspend/resume, timing or latency, BSD support,
-or an upgrade between two different package versions.
+what the compositor does on an emulated KMS device under a logind seat (and, for
+FreeBSD, that Koma compiles and passes its locked workspace test suite on
+FreeBSD 15.1 amd64). It does not prove physical DRM/KMS hardware support, GPU
+acceleration, multi-GPU, physical input devices, hotplug, suspend/resume, timing
+or latency, physical FreeBSD `drm-kmod` display output, or an upgrade between
+two different package versions.
 
 If the default mirror or a host proxy is slow from inside QEMU user networking,
 set `VM_MIRROR` to a nearby mirror (`https://<host>/archlinux/$repo/os/$arch`);

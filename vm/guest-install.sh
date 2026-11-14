@@ -53,7 +53,7 @@ mount --mkdir "${target_disk}1" /mnt/boot
 step "pacstrap"
 # Koma's own runtime dependencies (mesa, seatd, libinput, ...) are deliberately left
 # out so that `pacman -U` of the package has to resolve them.
-pacstrap -K /mnt base linux openssh sudo less foot wayland-utils ttf-dejavu grim namcap
+pacstrap -K /mnt base linux openssh sudo less foot wayland-utils ttf-dejavu grim python namcap
 genfstab -U /mnt >>/mnt/etc/fstab
 
 step "System configuration"

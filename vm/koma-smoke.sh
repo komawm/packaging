@@ -21,7 +21,9 @@ Steps:
   namcap     namcap on the package file
   cli        --headless-check, komactl validate/gen-types, koma-mcp --print-tools
   tty        Launch `koma --tty` in tester's autologin session on tty1 (logind),
-             probe Wayland globals, spawn foot, IPC, screendumps
+             probe Wayland globals, spawn foot, IPC, protocol checks, screendumps
+  protocols  Run Wayland protocol completeness checks (foot log, grim/wlr-screencopy,
+             wlr-layer-shell exclusive_zone, ext-session-lock-v1) against active tty1 session
   tty-stop   Stop the tty1 compositor and collect its log
   tarball    Extract the release tarball into /opt and run bin/koma --headless-check
   remove     pacman -R koma and verify that the package files are gone
@@ -176,8 +178,284 @@ EOF
         ls -la /tmp/capture.rgba; test -s /tmp/capture.rgba || { echo 'FAIL: empty capture'; fail=1; }
         exit \$fail" || tty_fail=1
     "$vm" screendump "$evidence/tty$tag-02-with-foot.png"
+    step_protocols || tty_fail=1
     gssh "pgrep -a -u tester -x koma && echo 'koma still alive after client spawn'" || tty_fail=1
     return "$tty_fail"
+}
+
+step_protocols() {
+    local proto_fail=0
+    local probe_local="$script_dir/wayland-probe.py"
+    [[ -f "$probe_local" ]] || die "missing Wayland probe helper: $probe_local"
+
+    "$vm" scp-in "$probe_local" /tmp/wayland-probe.py
+    gssh "chmod 0755 /tmp/wayland-probe.py"
+
+    echo '--- (a) globals + foot.log check ---'
+    gssh -u tester 'bash -s' <<'EOF' || proto_fail=1
+set -eu
+export XDG_RUNTIME_DIR=/run/user/1000
+sock=$(cd "$XDG_RUNTIME_DIR" && ls wayland-* 2>/dev/null | grep -v lock | head -n1 || true)
+[ -n "$sock" ] || { echo "FAIL: no WAYLAND_DISPLAY socket in $XDG_RUNTIME_DIR"; exit 1; }
+export WAYLAND_DISPLAY="$sock"
+
+command -v grim >/dev/null 2>&1 || { echo "FAIL: grim missing in guest"; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 missing in guest"; exit 1; }
+
+if [ ! -s /tmp/wayland-info.txt ]; then
+    timeout 10 wayland-info > /tmp/wayland-info.txt 2>&1
+fi
+for iface in wl_compositor wl_shm wl_output zwlr_layer_shell_v1 zwlr_screencopy_manager_v1 ext_session_lock_manager_v1; do
+    if ! grep -q "$iface" /tmp/wayland-info.txt; then
+        echo "FAIL: compositor missing advertised Wayland global: $iface"
+        exit 1
+    fi
+done
+echo "PASS: advertised Wayland globals include layer-shell, screencopy, and session-lock"
+
+if [ ! -f /tmp/foot.log ]; then
+    setsid -f foot -e bash -c "echo koma proto smoke; sleep 120" </dev/null >/tmp/foot.log 2>&1
+    sleep 3
+fi
+echo '--- /tmp/foot.log ---'
+cat /tmp/foot.log
+if grep -qiE 'missing required wayland protocol|unsupported.*protocol|failed to connect to a wayland compositor|wayland.*fatal' /tmp/foot.log; then
+    echo "FAIL: foot reported critical Wayland protocol error in /tmp/foot.log"
+    exit 1
+fi
+pgrep -u tester -x foot >/dev/null || { echo "FAIL: foot not running for tester"; exit 1; }
+EOF
+
+    echo '--- (b) unlocked grim (wlr-screencopy) check ---'
+    gssh -u tester 'bash -s' <<'EOF' || proto_fail=1
+set -eu
+export XDG_RUNTIME_DIR=/run/user/1000
+sock=$(cd "$XDG_RUNTIME_DIR" && ls wayland-* 2>/dev/null | grep -v lock | head -n1 || true)
+[ -n "$sock" ] || exit 1
+export WAYLAND_DISPLAY="$sock"
+rm -f /tmp/grim-unlocked.png
+timeout 15 grim /tmp/grim-unlocked.png
+test -s /tmp/grim-unlocked.png || { echo "FAIL: grim produced empty unlocked PNG"; exit 1; }
+python3 /tmp/wayland-probe.py check-png /tmp/grim-unlocked.png --require-non-black
+EOF
+    if gssh "test -s /tmp/grim-unlocked.png" 2>/dev/null; then
+        "$vm" scp-out /tmp/grim-unlocked.png "$evidence/tty$tag-grim-unlocked.png" || proto_fail=1
+    fi
+
+    echo '--- (c) wlr-layer-shell exclusive_zone check ---'
+    local layer_ok=0
+    if gssh -u tester 'bash -s' <<'EOF'
+set -eu
+export XDG_RUNTIME_DIR=/run/user/1000
+sock=$(cd "$XDG_RUNTIME_DIR" && ls wayland-* 2>/dev/null | grep -v lock | head -n1 || true)
+[ -n "$sock" ] || exit 1
+export WAYLAND_DISPLAY="$sock"
+
+get_rect() {
+    timeout 10 komactl inventory | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for ws in data.get("workspaces", []):
+    aw = ws.get("active_window")
+    if not aw and ws.get("windows"):
+        aw = ws["windows"][0]
+    if aw and aw.get("rect"):
+        r = aw["rect"]
+        print(r["x"], r["y"], r["w"], r["h"])
+        sys.exit(0)
+sys.exit(1)
+'
+}
+
+read -r x0 y0 w0 h0 < <(get_rect)
+echo "exclusive_zone before: x=$x0 y=$y0 w=$w0 h=$h0"
+[ "$w0" -gt 0 ] && [ "$h0" -gt 0 ] || { echo "FAIL: invalid initial window rect"; exit 1; }
+printf '%s %s %s %s\n' "$x0" "$y0" "$w0" "$h0" > /tmp/layer-before.rect
+
+rm -f /tmp/layer-ready.txt /tmp/layer.pid /tmp/layer-panel.log
+setsid -f bash -c 'echo $$ > /tmp/layer.pid; exec python3 /tmp/wayland-probe.py layer-panel --height 64 --anchor top --ready-file /tmp/layer-ready.txt' </dev/null >/tmp/layer-panel.log 2>&1
+
+ready=0
+for _ in $(seq 1 20); do
+    if [ -s /tmp/layer-ready.txt ]; then
+        ready=1
+        break
+    fi
+    sleep 0.5
+done
+if [ "$ready" -ne 1 ]; then
+    echo "FAIL: layer-panel did not map"
+    cat /tmp/layer-panel.log 2>/dev/null || true
+    exit 1
+fi
+cat /tmp/layer-ready.txt
+
+shrunk=0
+x1=$x0 y1=$y0 w1=$w0 h1=$h0
+for _ in $(seq 1 12); do
+    if read -r x1 y1 w1 h1 < <(get_rect); then
+        if [ "$h1" -le $((h0 - 32)) ] || [ "$y1" -ge $((y0 + 32)) ]; then
+            shrunk=1
+            break
+        fi
+    fi
+    sleep 0.5
+done
+echo "exclusive_zone during: x=$x1 y=$y1 w=$w1 h=$h1"
+if [ "$shrunk" -ne 1 ]; then
+    echo "FAIL: wlr-layer-shell exclusive_zone=64 did not shrink tiled window workarea (before h=$h0 y=$y0, during h=$h1 y=$y1)"
+    exit 1
+fi
+EOF
+    then
+        layer_ok=1
+        "$vm" screendump "$evidence/tty$tag-03-layer-panel.png"
+    else
+        proto_fail=1
+    fi
+
+    gssh -u tester 'bash -s' <<'EOF' || proto_fail=1
+set -eu
+export XDG_RUNTIME_DIR=/run/user/1000
+if [ -s /tmp/layer.pid ]; then
+    lpid=$(cat /tmp/layer.pid)
+    kill -TERM "$lpid" 2>/dev/null || true
+    for _ in $(seq 1 15); do
+        kill -0 "$lpid" 2>/dev/null || break
+        sleep 0.2
+    done
+    rm -f /tmp/layer.pid
+fi
+if [ -s /tmp/layer-before.rect ]; then
+    read -r x0 y0 w0 h0 < /tmp/layer-before.rect
+    restored=0
+    xr=$x0 yr=$y0 wr=$w0 hr=$h0
+    for _ in $(seq 1 10); do
+        if read -r xr yr wr hr < <(timeout 10 komactl inventory | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for ws in data.get("workspaces", []):
+    aw = ws.get("active_window") or (ws.get("windows") or [None])[0]
+    if aw and aw.get("rect"):
+        r = aw["rect"]
+        print(r["x"], r["y"], r["w"], r["h"])
+        sys.exit(0)
+sys.exit(1)
+'); then
+            if [ "$hr" -ge $((h0 - 2)) ] && [ "$yr" -le $((y0 + 2)) ]; then
+                restored=1
+                break
+            fi
+        fi
+        sleep 0.5
+    done
+    echo "exclusive_zone after close: x=$xr y=$yr w=$wr h=$hr"
+    [ "$restored" -eq 1 ] || { echo "FAIL: workarea did not restore after layer panel closed"; exit 1; }
+fi
+EOF
+    if [[ "$layer_ok" -eq 1 ]]; then
+        echo "PASS: wlr-layer-shell exclusive_zone verified"
+    fi
+
+    echo '--- (d) ext-session-lock-v1 lock, screencopy isolation, and clean unlock ---'
+    if gssh -u tester 'bash -s' <<'EOF'
+set -eu
+export XDG_RUNTIME_DIR=/run/user/1000
+sock=$(cd "$XDG_RUNTIME_DIR" && ls wayland-* 2>/dev/null | grep -v lock | head -n1 || true)
+[ -n "$sock" ] || exit 1
+export WAYLAND_DISPLAY="$sock"
+
+rm -f /tmp/lock.pid /tmp/lock-ready.txt /tmp/lock-unlocked.txt /tmp/session-lock.log /tmp/grim-locked.png /tmp/grim-locked.log /tmp/grim-unlocked-after.png
+setsid -f bash -c 'echo $$ > /tmp/lock.pid; exec python3 /tmp/wayland-probe.py session-lock --ready-file /tmp/lock-ready.txt --unlocked-file /tmp/lock-unlocked.txt --timeout 120' </dev/null >/tmp/session-lock.log 2>&1
+
+locked=0
+for _ in $(seq 1 20); do
+    if [ -s /tmp/lock-ready.txt ]; then
+        locked=1
+        break
+    fi
+    sleep 0.5
+done
+if [ "$locked" -ne 1 ]; then
+    echo "FAIL: ext-session-lock-v1 client did not reach LOCKED state"
+    cat /tmp/session-lock.log 2>/dev/null || true
+    exit 1
+fi
+cat /tmp/lock-ready.txt
+EOF
+    then
+        "$vm" screendump "$evidence/tty$tag-04-session-locked.png"
+        if [[ -s "$evidence/tty$tag-02-with-foot.png" ]]; then
+            python3 "$probe_local" check-png \
+                "$evidence/tty$tag-04-session-locked.png" \
+                --compare-unlocked "$evidence/tty$tag-02-with-foot.png" \
+                --require-masked || proto_fail=1
+        fi
+
+        gssh -u tester 'bash -s' <<'EOF' || proto_fail=1
+set -eu
+export XDG_RUNTIME_DIR=/run/user/1000
+sock=$(cd "$XDG_RUNTIME_DIR" && ls wayland-* 2>/dev/null | grep -v lock | head -n1 || true)
+[ -n "$sock" ] || exit 1
+export WAYLAND_DISPLAY="$sock"
+
+lpid=$(cat /tmp/lock.pid)
+kill -0 "$lpid" 2>/dev/null || { echo "FAIL: session-lock client exited unexpectedly while locked"; cat /tmp/session-lock.log 2>/dev/null || true; exit 1; }
+
+if timeout 10 grim /tmp/grim-locked.png >/tmp/grim-locked.log 2>&1; then
+    echo "grim returned exit 0 while locked; verifying locked frame is masked"
+    if [ -s /tmp/grim-unlocked.png ]; then
+        python3 /tmp/wayland-probe.py check-png /tmp/grim-locked.png --compare-unlocked /tmp/grim-unlocked.png --require-masked
+    else
+        python3 /tmp/wayland-probe.py check-png /tmp/grim-locked.png
+    fi
+else
+    echo "PASS: grim screencopy rejected while session locked"
+    cat /tmp/grim-locked.log 2>/dev/null || true
+fi
+
+kill -USR1 "$lpid"
+unlocked=0
+for _ in $(seq 1 20); do
+    if [ -s /tmp/lock-unlocked.txt ]; then
+        unlocked=1
+        break
+    fi
+    sleep 0.5
+done
+if [ "$unlocked" -ne 1 ]; then
+    echo "FAIL: ext-session-lock-v1 client did not unlock cleanly"
+    cat /tmp/session-lock.log 2>/dev/null || true
+    exit 1
+fi
+cat /tmp/lock-unlocked.txt
+
+sleep 0.5
+timeout 15 grim /tmp/grim-unlocked-after.png
+test -s /tmp/grim-unlocked-after.png || { echo "FAIL: grim produced empty post-unlock PNG"; exit 1; }
+python3 /tmp/wayland-probe.py check-png /tmp/grim-unlocked-after.png --require-non-black
+
+timeout 10 komactl inventory > /tmp/inv-after-unlock.json
+grep -qE '"win_id":[[:space:]]*"win_' /tmp/inv-after-unlock.json || { echo "FAIL: mapped window missing after unlock"; cat /tmp/inv-after-unlock.json; exit 1; }
+pgrep -u tester -x foot >/dev/null || { echo "FAIL: foot died across lock/unlock cycle"; exit 1; }
+EOF
+        if gssh "test -s /tmp/grim-locked.png" 2>/dev/null; then
+            "$vm" scp-out /tmp/grim-locked.png "$evidence/tty$tag-grim-locked.png" || proto_fail=1
+        fi
+        if gssh "test -s /tmp/grim-unlocked-after.png" 2>/dev/null; then
+            "$vm" scp-out /tmp/grim-unlocked-after.png "$evidence/tty$tag-grim-unlocked-after.png" || proto_fail=1
+        fi
+        "$vm" screendump "$evidence/tty$tag-05-session-unlocked.png"
+    else
+        proto_fail=1
+        gssh -u tester 'bash -s' <<'EOF' || true
+if [ -s /tmp/lock.pid ]; then
+    kill -USR1 "$(cat /tmp/lock.pid)" 2>/dev/null || true
+fi
+EOF
+    fi
+
+    return "$proto_fail"
 }
 
 step_tty_stop() {
@@ -247,6 +525,7 @@ main() {
                 run_step "$s" "step_$s" || rc=1
                 ;;
             tty) run_step "tty$tag" step_tty || rc=1 ;;
+            protocols) run_step "protocols$tag" step_protocols || rc=1 ;;
             tty-stop) run_step "tty-stop$tag" step_tty_stop || rc=1 ;;
             *) die "unknown step: $s (see --help)" ;;
         esac

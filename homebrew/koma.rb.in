@@ -12,7 +12,6 @@ class Koma < Formula
   depends_on "rust" => :build
   depends_on "dbus"
   depends_on "fontconfig"
-  depends_on "libdisplay-info"
   depends_on "libdrm"
   depends_on "libinput"
   depends_on "libxkbcommon"

@@ -12,7 +12,7 @@ Koma pins Rust `1.100.0` (edition `2024`) in `rust-toolchain.toml`. Because Debi
 lists native C/Wayland development headers (`debhelper-compat`, `pkgconf`,
 `libudev-dev`, `libinput-dev`, `libseat-dev`, `libgbm-dev`, `libegl-dev`,
 `libgles-dev`, `libwayland-dev`, `libxkbcommon-dev`, `libdbus-1-dev`,
-`libfontconfig-dev`, `libdisplay-info-dev`) while `cargo` matching
+`libfontconfig-dev`) while `cargo` matching
 `rust-toolchain.toml` is supplied in `PATH` (for example via `rustup`).
 
 `debian/rules.in` disables `dh_dwz` because Koma's release Cargo profile omits

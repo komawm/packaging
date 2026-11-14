@@ -8,7 +8,7 @@ set -euo pipefail
 dnf install -y --setopt=install_weak_deps=False \
     rpm-build rustup pkgconf-pkg-config systemd-devel libinput-devel \
     libseat-devel mesa-libgbm-devel mesa-libEGL-devel wayland-devel \
-    libxkbcommon-devel dbus-devel fontconfig-devel libdisplay-info-devel \
+    libxkbcommon-devel dbus-devel fontconfig-devel \
     tar gzip shadow-utils findutils sed
 
 useradd --create-home --shell /bin/bash builder

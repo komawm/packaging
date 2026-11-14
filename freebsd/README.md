@@ -9,7 +9,7 @@ provides `Makefile.in`, `distinfo.in`, `pkg-manifest.ucl.in`, `pkg-descr`, and
 FreeBSD packaging and runtime behavior are **unverified and experimental**
 (`accepted = false`, `runtime_verified = false`). Koma's compositor backend uses
 Smithay DRM/KMS/libinput/seatd interfaces that rely on FreeBSD compatibility
-shims (`sysutils/seatd`, `devel/libudev-devd`, `devel/libdisplay-info`). Isolated
+shims (`sysutils/seatd`, `devel/libudev-devd`). Isolated
 FreeBSD 15.1 VM build and unit verification belongs in a follow-up VM harness
 task, not in this template commit alone.
 
@@ -23,7 +23,7 @@ Linux systemd user units (`koma.service`, `koma-shutdown.target`) are omitted;
   `SHA256` in `distinfo`), then `make stage check-plist package`.
 - **Standalone CI build**: build `cargo build --release --locked` with FreeBSD
   packages (`pkgconf`, `rust`, `libudev-devd`, `libinput`, `seatd`, `mesa-libs`,
-  `libdrm`, `wayland`, `libxkbcommon`, `dbus`, `fontconfig`, `libdisplay-info`),
+  `libdrm`, `wayland`, `libxkbcommon`, `dbus`, `fontconfig`),
   stage into `PREFIX=/usr/local` matching `pkg-plist`, and package via
   `pkg create -M pkg-manifest.ucl -p pkg-plist`.
 
