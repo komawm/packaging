@@ -721,6 +721,21 @@ cmd_provision() {
     run_ssh "set -eu
         export ASSUME_ALWAYS_YES=yes
         export BATCH=yes
+        export FETCH_TIMEOUT=30
+        export FETCH_RETRY=3
+        retry_pkg() {
+            attempt=1
+            while [ \"\$attempt\" -le 5 ]; do
+                if \"\$@\"; then
+                    return 0
+                fi
+                if [ \"\$attempt\" -eq 5 ]; then
+                    return 1
+                fi
+                attempt=\$((attempt + 1))
+                sleep 3
+            done
+        }
         mkdir -p /usr/local/etc/pkg/repos
         rm -f /usr/local/etc/pkg/repos/FreeBSD.conf
         cat <<'__KOMA_PKG_REPO__' > /usr/local/etc/pkg/repos/99-koma-vm.conf
@@ -734,13 +749,13 @@ FreeBSD: {
   enabled: yes
 }
 __KOMA_PKG_REPO__
-        pkg -N >/dev/null 2>&1 || pkg bootstrap -f
-        pkg update -f
-        pkg install -y \
+        pkg -N >/dev/null 2>&1 || retry_pkg pkg bootstrap -f
+        retry_pkg pkg update
+        retry_pkg pkg install -y \
             pkgconf git curl ca_root_nss sudo python3 \
             dbus libdrm fontconfig libinput \
             seatd libudev-devd wayland libxkbcommon mesa-libs mesa-dri pixman sqlite3
-        pkg install -y rustup-init || true
+        retry_pkg pkg install -y rustup-init || true
         mkdir -p /usr/local/etc/sudoers.d
         printf '%s\n' '%wheel ALL=(ALL:ALL) NOPASSWD: ALL' > /usr/local/etc/sudoers.d/wheel
         chmod 440 /usr/local/etc/sudoers.d/wheel
@@ -809,6 +824,7 @@ cmd_koma_check() {
         if [ \"\$need_rustup\" -eq 1 ]; then
             target_tc=\"\${req_channel:-stable}\"
             rustup_ok=1
+            export RUSTUP_USE_CURL=1
             if ! command -v rustup >/dev/null 2>&1; then
                 if command -v rustup-init >/dev/null 2>&1; then
                     rustup-init -y --no-modify-path --profile minimal --default-toolchain \"\$target_tc\" || rustup_ok=0
@@ -821,12 +837,24 @@ cmd_koma_check() {
                 rustup override set \"\$target_tc\" || rustup_ok=0
             fi
             if [ \"\$rustup_ok\" -eq 0 ] || ! command -v cargo >/dev/null 2>&1; then
-                env ASSUME_ALWAYS_YES=yes BATCH=yes pkg install -y rust
+                attempt=1
+                while [ \"\$attempt\" -le 5 ]; do
+                    if env ASSUME_ALWAYS_YES=yes BATCH=yes FETCH_TIMEOUT=30 FETCH_RETRY=3 pkg install -y rust; then
+                        break
+                    fi
+                    if [ \"\$attempt\" -eq 5 ]; then
+                        exit 1
+                    fi
+                    attempt=\$((attempt + 1))
+                    sleep 3
+                done
             fi
         fi
         uname -a
         rustc --version
         cargo --version
+        export CARGO_HTTP_MULTIPLEXING=false
+        export CARGO_NET_RETRY=8
         cargo check --workspace --all-targets --locked
         cargo test --workspace --locked
     " 2>&1 | tee "$log_file"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify packaging metadata, multi-distro templates, and CD workflows without building or publishing."""
+"""Verify packaging metadata, multi-distro templates, nFPM configs, and CD workflows without PyYAML or publishing."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import tomllib
 
@@ -25,38 +26,118 @@ SECRET_PATTERNS = (
     re.compile(r"github_pat_[A-Za-z0-9_]{22,}"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 )
-SHA_PIN = re.compile(r"^\s*(?:-\s+)?uses:\s+[\w.-]+/[\w./-]+@[0-9a-f]{40}(?:\s+#.*)?$")
+SHA_PIN = re.compile(
+    r"^\s*(?:-\s+)?uses:\s+(?:[\w.-]+/[\w./-]+@[0-9a-f]{40}|docker://[\w./:-]+@sha256:[0-9a-f]{64})(?:\s+#.*)?$"
+)
 DIGEST_IMAGE = re.compile(r"^[a-z0-9.-]+(?:/[a-z0-9.-]+)*:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$")
+FORBIDDEN_EPHEMERAL_RUNNERS = re.compile(r"(?<![A-Za-z0-9_-])(?:bunx|npx|pipx\s+run|uvx)(?![A-Za-z0-9_-])")
 
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     verify_repository_files(root)
     verify_vm_harnesses(root)
+    verify_apt_files(root)
     scan_for_secret_values(root)
     config = tomllib.loads((root / "packaging.toml").read_text(encoding="utf-8"))
     verify_top_level_policy(root, config)
     verify_all_distro_templates(root, config)
+    verify_nfpm_specs(root, config)
+    verify_dependabot(root)
     if config["publish_enabled"] is True:
         verify_workflows(root, config)
     elif config["publish_enabled"] is not False:
         raise SystemExit("publish_enabled must be a boolean")
-    print("Packaging metadata/template validation passed; no package was built or accepted")
+    print("Packaging metadata, templates, nFPM specs, and workflow gates passed; no package was built or accepted")
+
+
+def validate_yaml_syntax(text: str, rel_path: Path) -> None:
+    """Perform stdlib-only structural YAML sanity checks (no tabs, valid block scalar/mapping indentation)."""
+    block_indent: int | None = None
+    for lineno, raw_line in enumerate(text.splitlines(), start=1):
+        if not raw_line.strip():
+            continue
+        leading = len(raw_line) - len(raw_line.lstrip(" \t"))
+        prefix = raw_line[:leading]
+        if "\t" in prefix:
+            raise SystemExit(f"YAML indentation must not use tabs in {rel_path}:{lineno}")
+        if block_indent is not None:
+            if leading > block_indent:
+                continue
+            block_indent = None
+        stripped = raw_line.lstrip(" ")
+        if stripped.startswith("#") or stripped in {"---", "..."}:
+            continue
+        if stripped.endswith("|") or stripped.endswith("|-") or stripped.endswith(">") or stripped.endswith(">-"):
+            block_indent = leading
+            continue
+        if stripped.startswith("- "):
+            item = stripped[2:].strip()
+            if item.endswith("|") or item.endswith("|-") or item.endswith(">") or item.endswith(">-"):
+                block_indent = leading + 2
+            continue
+        if stripped == "-":
+            continue
+        if ":" not in stripped:
+            raise SystemExit(f"Malformed YAML line in {rel_path}:{lineno}: {raw_line}")
+
+
+def parse_nfpm_yaml(text: str, rel_path: Path) -> tuple[dict[str, str], list[str]]:
+    """Extract top-level scalar fields and contents[].dst paths from an nFPM v2 YAML spec using stdlib."""
+    validate_yaml_syntax(text, rel_path)
+    scalars: dict[str, str] = {}
+    dsts: list[str] = []
+    in_contents = False
+    block_indent: int | None = None
+
+    for raw_line in text.splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        stripped = raw_line.strip()
+
+        if block_indent is not None:
+            if indent > block_indent:
+                continue
+            block_indent = None
+
+        if indent == 0:
+            in_contents = stripped == "contents:"
+            if not in_contents and ":" in stripped:
+                key, val = stripped.split(":", 1)
+                val = val.strip()
+                if val in {"|", "|-", ">", ">-"}:
+                    block_indent = 0
+                elif val:
+                    scalars[key.strip()] = val.strip("\"'")
+        elif in_contents:
+            dst_match = re.match(r"^(?:-\s+)?dst:\s*(\S+)", stripped)
+            if dst_match:
+                dsts.append(dst_match.group(1).strip("\"'"))
+    return scalars, dsts
 
 
 def verify_repository_files(root: Path) -> None:
-    """Validate TOML syntax, Python AST, and canonical link rules in README/AGENTS files."""
+    """Validate TOML syntax, Python AST, stdlib YAML sanity, and canonical links in README/AGENTS files."""
     for path in root.rglob("*"):
-        if not path.is_file() or ".git" in path.parts:
+        if not path.is_file() or ".git" in path.parts or ".worktrees" in path.parts:
             continue
+        rel = path.relative_to(root)
         if path.suffix == ".toml":
             tomllib.loads(path.read_text(encoding="utf-8"))
+        elif path.suffix in {".yml", ".yaml"}:
+            validate_yaml_syntax(path.read_text(encoding="utf-8"), rel)
         elif path.suffix == ".py":
             ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         if path.name in {"README.md", "AGENTS.md"}:
             for target in re.findall(r"\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
                 if not target.startswith(("https://", "mailto:", "#")):
-                    raise SystemExit(f"Noncanonical link in {path.relative_to(root)}: {target}")
+                    raise SystemExit(f"Noncanonical link in {rel}: {target}")
+        if path.suffix in {".yml", ".yaml", ".sh"} or path.parent.name == "scripts":
+            if path.suffix in {".yml", ".yaml", ".sh"}:
+                content = path.read_text(encoding="utf-8")
+                if FORBIDDEN_EPHEMERAL_RUNNERS.search(content):
+                    raise SystemExit(f"Forbidden ephemeral runner (bunx/npx/pipx run/uvx) in {rel}")
 
 
 def verify_vm_harnesses(root: Path) -> None:
@@ -92,8 +173,23 @@ def verify_vm_harnesses(root: Path) -> None:
         raise SystemExit("freebsd-vm.sh must keep distinct defaults (freebsd-koma, port 2223)")
 
 
+def verify_apt_files(root: Path) -> None:
+    """Validate R2-hosted deb822 APT repository source and setup script."""
+    sources_path = root / "apt/komawm.sources"
+    setup_path = root / "apt/setup.sh"
+    if not sources_path.is_file():
+        raise SystemExit("Missing apt/komawm.sources")
+    sources_text = sources_path.read_text(encoding="utf-8")
+    for expected in ("Types: deb", "URIs: https://cdn.komawm.org/apt", "Suites: stable", "Architectures: amd64 arm64"):
+        if expected not in sources_text:
+            raise SystemExit(f"apt/komawm.sources missing required line: {expected}")
+    if not setup_path.is_file() or not (setup_path.stat().st_mode & stat.S_IXUSR):
+        raise SystemExit("apt/setup.sh must exist and be executable")
+    run_checked(["bash", "-n", str(setup_path)], "bash -n apt/setup.sh")
+
+
 def verify_top_level_policy(root: Path, config: dict) -> None:
-    """Verify release gating, automatic publish lock, and license separation."""
+    """Verify release gating, automatic publish lock, CDN metadata, and license separation."""
     if config.get("accepted") is not False or config["release"].get("first_accepted_version") != "0.1.0":
         raise SystemExit("Packaging must remain unaccepted until the 0.1.0 acceptance gate")
     if config.get("automatic_publish") is not False:
@@ -109,6 +205,9 @@ def verify_top_level_policy(root: Path, config: dict) -> None:
         raise SystemExit("Keep one complete MIT LICENSE for packaging infrastructure")
     if config["release"]["targets"] != {"koma": "komawm/koma", "jiku": "komawm/jiku"}:
         raise SystemExit("Release artifacts belong to their owning product repository")
+    cdn = config.get("cdn", {})
+    if cdn.get("provider") != "cloudflare-r2" or cdn.get("bucket") != "komawm" or cdn.get("origin") != "https://cdn.komawm.org":
+        raise SystemExit("[cdn] must target cloudflare-r2 bucket komawm at https://cdn.komawm.org")
 
 
 def verify_distro_metadata(root: Path, config: dict, distro: str) -> list[Path]:
@@ -221,10 +320,76 @@ def verify_all_distro_templates(root: Path, config: dict) -> None:
                 rendered_text = rendered_path.read_text(encoding="utf-8")
                 if re.search(r"@[A-Z0-9_]+@", rendered_text):
                     raise SystemExit(f"Unexpanded placeholder in rendered {distro} file: {rendered_path.name}")
-            validate_rendered_distro(distro, dest, written)
+            validate_rendered_distro(distro, dest)
+
+        # Also validate Jiku Arch PKGBUILD template and render_arch.py --product jiku.
+        jiku_rel = config["archlinux"].get("jiku_template")
+        if not isinstance(jiku_rel, str):
+            raise SystemExit("[archlinux] must declare jiku_template")
+        jiku_tpl = root / jiku_rel
+        if not jiku_tpl.is_file():
+            raise SystemExit(f"Missing Jiku Arch template: {jiku_rel}")
+        jiku_text = jiku_tpl.read_text(encoding="utf-8")
+        if "SKIP" in jiku_text or "--locked" not in jiku_text:
+            raise SystemExit("Jiku Arch template must verify source and use --locked Cargo dependencies")
+        if set(re.findall(r"@[A-Z0-9_]+@", jiku_text)) != ALLOWED_PLACEHOLDERS:
+            raise SystemExit(f"Jiku Arch template must bind {sorted(ALLOWED_PLACEHOLDERS)}")
+        if 'install -Dm644 LICENSE "$pkgdir/usr/share/licenses/jiku/LICENSE"' not in jiku_text:
+            raise SystemExit("Jiku Arch template must install LICENSE under /usr/share/licenses/jiku/")
+        if "GPL-3.0-or-later" not in jiku_text:
+            raise SystemExit("Jiku Arch template must declare GPL-3.0-or-later")
+        jiku_out = tmp_dir / "PKGBUILD.jiku"
+        run_checked(
+            [
+                sys.executable,
+                str(root / "scripts/render_arch.py"),
+                "--product",
+                "jiku",
+                "--source-commit",
+                DUMMY_COMMIT,
+                "--source-sha256",
+                DUMMY_SHA256,
+                "--version",
+                "0.0.1",
+                "--output",
+                str(jiku_out),
+            ],
+            "render_arch.py --product jiku",
+        )
+        run_checked(["bash", "-n", str(jiku_out)], "Arch rendered Jiku PKGBUILD syntax check")
 
 
-def validate_rendered_distro(distro: str, dest: Path, written: list[Path]) -> None:
+def verify_nfpm_specs(root: Path, config: dict) -> None:
+    """Validate nFPM v2 YAML specifications for both koma and jiku."""
+    nfpm = config.get("nfpm")
+    if not isinstance(nfpm, dict):
+        raise SystemExit("packaging.toml missing [nfpm] section")
+    for product, key in (("koma", "koma_config"), ("jiku", "jiku_config")):
+        rel = nfpm.get(key)
+        if not isinstance(rel, str):
+            raise SystemExit(f"[nfpm] missing {key}")
+        spec_path = root / rel
+        if not spec_path.is_file():
+            raise SystemExit(f"Missing nFPM spec: {rel}")
+        scalars, dsts = parse_nfpm_yaml(spec_path.read_text(encoding="utf-8"), Path(rel))
+        if scalars.get("name") != product or scalars.get("license") != "GPL-3.0-or-later":
+            raise SystemExit(f"nFPM config {rel} must set name={product} and license=GPL-3.0-or-later")
+        expected_license_dst = f"/usr/share/licenses/{product}/LICENSE"
+        if expected_license_dst not in dsts:
+            raise SystemExit(f"nFPM config {rel} must install {expected_license_dst}")
+
+
+def verify_dependabot(root: Path) -> None:
+    """Ensure .github/dependabot.yml uses monthly grouped GitHub Actions updates."""
+    dep = root / ".github/dependabot.yml"
+    if not dep.is_file():
+        raise SystemExit("Missing .github/dependabot.yml")
+    text = dep.read_text(encoding="utf-8")
+    if "interval: monthly" not in text or "package-ecosystem: github-actions" not in text:
+        raise SystemExit(".github/dependabot.yml must configure monthly github-actions updates")
+
+
+def validate_rendered_distro(distro: str, dest: Path) -> None:
     """Run deterministic local syntax/structure checks on rendered templates."""
     if distro == "archlinux":
         run_checked(["bash", "-n", str(dest)], "Arch rendered PKGBUILD syntax check")
@@ -330,19 +495,13 @@ def run_script_lines(workflow: str) -> list[str]:
     return lines
 
 
-def verify_workflow_common(workflow_path: Path, expected_secret: str) -> str:
-    """Enforce universal security invariants on every GitHub Actions CD workflow."""
+def verify_workflow_universal(workflow_path: Path) -> str:
+    """Enforce universal permissions, SHA pinning, secret isolation, and container digest pinning."""
     workflow = workflow_path.read_text(encoding="utf-8")
-    on_block = re.search(r"^on:\n(.*?)(?=^\S)", workflow, re.M | re.S)
-    triggers = re.findall(r"^  ([a-z_]+):", on_block.group(1), re.M) if on_block else []
-    if triggers != ["workflow_dispatch"]:
-        raise SystemExit(f"{workflow_path.name} must be workflow_dispatch only, found {triggers}")
     if not re.search(r"^permissions:\n  contents: read\n(?!  )", workflow, re.M):
         raise SystemExit(f"{workflow_path.name} top-level permissions must be exactly contents: read")
     if re.search(r"^\s+[a-z-]+: write\b", workflow, re.M):
         raise SystemExit(f"{workflow_path.name} must not grant write permissions to GITHUB_TOKEN")
-    if not re.search(r"publish:\n(?:\s+[a-z].*\n)*?\s+type: boolean\n(?:\s+[a-z].*\n)*?\s+default: false", workflow):
-        raise SystemExit(f"{workflow_path.name} publish input must be a boolean defaulting to false")
     for line in workflow.splitlines():
         if re.match(r"^\s*(?:-\s+)?uses:", line) and not SHA_PIN.match(line):
             raise SystemExit(f"Action must be pinned by full commit SHA in {workflow_path.name}: {line.strip()}")
@@ -362,20 +521,39 @@ def verify_workflow_common(workflow_path: Path, expected_secret: str) -> str:
                 raise SystemExit(
                     f"Container image in {workflow_path.name} job {job_name!r} must be pinned by sha256 digest: {image_ref}"
                 )
-
-    publish = job_block(workflow, "publish")
-    if f"    environment: release\n" not in publish:
-        raise SystemExit(f"{workflow_path.name} publish job must run under environment: release")
-    if not re.search(r"^    if: .*inputs\.publish", publish, re.M):
-        raise SystemExit(f"{workflow_path.name} publish job must be gated on inputs.publish")
-    if f"GH_TOKEN: ${{{{ secrets.{expected_secret} }}}}" not in publish or "--clobber" not in publish:
-        raise SystemExit(f"{workflow_path.name} publish job must use secrets.{expected_secret} and --clobber")
-    if workflow.count("secrets.") != 1:
-        raise SystemExit(f"{workflow_path.name} may reference secrets only once in the publish job")
     return workflow
 
 
-def verify_prerelease_metadata(section: dict, config: dict, root: Path) -> Path:
+def verify_cd_workflow_common(workflow_path: Path, allowed_secrets: set[str], single_secret_clobber: str | None) -> str:
+    """Enforce universal security invariants on every GitHub Actions CD workflow."""
+    workflow = verify_workflow_universal(workflow_path)
+    on_block = re.search(r"^on:\n(.*?)(?=^\S)", workflow, re.M | re.S)
+    triggers = re.findall(r"^  ([a-z_]+):", on_block.group(1), re.M) if on_block else []
+    if triggers != ["workflow_dispatch"]:
+        raise SystemExit(f"{workflow_path.name} must be workflow_dispatch only, found {triggers}")
+    if not re.search(r"publish:\n(?:\s+[a-z].*\n)*?\s+type: boolean\n(?:\s+[a-z].*\n)*?\s+default: false", workflow):
+        raise SystemExit(f"{workflow_path.name} publish input must be a boolean defaulting to false")
+
+    publish = job_block(workflow, "publish")
+    if "    environment: release\n" not in publish:
+        raise SystemExit(f"{workflow_path.name} publish job must run under environment: release")
+    if not re.search(r"^    if: .*inputs\.publish", publish, re.M):
+        raise SystemExit(f"{workflow_path.name} publish job must be gated on inputs.publish")
+
+    used_secrets = set(re.findall(r"secrets\.([A-Z0-9_]+)", workflow))
+    unknown_secrets = used_secrets - allowed_secrets
+    if unknown_secrets:
+        raise SystemExit(f"{workflow_path.name} references undeclared secrets: {sorted(unknown_secrets)}")
+
+    if single_secret_clobber is not None:
+        if f"GH_TOKEN: ${{{{ secrets.{single_secret_clobber} }}}}" not in publish or "--clobber" not in publish:
+            raise SystemExit(f"{workflow_path.name} publish job must use secrets.{single_secret_clobber} and --clobber")
+        if workflow.count("secrets.") != 1:
+            raise SystemExit(f"{workflow_path.name} may reference secrets only once in the publish job")
+    return workflow
+
+
+def verify_prerelease_metadata(section: dict, config: dict, root: Path, key: str = "workflow") -> Path:
     """Validate common prerelease metadata keys and return the referenced workflow path."""
     expected = {
         "publish_mode": "workflow_dispatch-with-release-environment",
@@ -385,9 +563,9 @@ def verify_prerelease_metadata(section: dict, config: dict, root: Path) -> Path:
     }
     if not isinstance(section, dict) or any(section.get(k) != v for k, v in expected.items()):
         raise SystemExit(f"Prerelease section must declare {expected}")
-    workflow_rel = section.get("workflow")
+    workflow_rel = section.get(key)
     if not isinstance(workflow_rel, str):
-        raise SystemExit("Prerelease section must declare workflow")
+        raise SystemExit(f"Prerelease section must declare {key}")
     workflow_path = root / workflow_rel
     if not workflow_path.is_file():
         raise SystemExit(f"Publishing is enabled but {workflow_rel} is missing")
@@ -397,21 +575,40 @@ def verify_prerelease_metadata(section: dict, config: dict, root: Path) -> Path:
 
 
 def verify_workflows(root: Path, config: dict) -> None:
-    """Validate all CD workflows declared in packaging.toml and present in .github/workflows/."""
+    """Validate CI and all CD workflows declared in packaging.toml and present in .github/workflows/."""
     pre = config.get("development_prerelease")
     if not isinstance(pre, dict) or pre.get("channel") != "development" or pre.get("accepted") is not False:
         raise SystemExit("[development_prerelease] must declare channel='development' and accepted=false")
     if not re.fullmatch(r"0\.0\.\d+", pre.get("version", "")):
         raise SystemExit("Development prereleases must use a 0.0.x version")
 
-    arch_wf_path = verify_prerelease_metadata(pre, config, root)
-    arch_wf = verify_workflow_common(arch_wf_path, pre["required_secret"])
+    env_secrets = set(pre.get("environment_secrets", []))
+    if pre.get("required_secret") not in env_secrets:
+        raise SystemExit("[development_prerelease] environment_secrets must include required_secret")
+
+    ci_wf_path = root / ".github/workflows/ci.yml"
+    if not ci_wf_path.is_file():
+        raise SystemExit("Missing .github/workflows/ci.yml")
+    ci_wf = verify_workflow_universal(ci_wf_path)
+    if "secrets." in ci_wf:
+        raise SystemExit("ci.yml must never reference secrets")
+
+    arch_wf_path = verify_prerelease_metadata(pre, config, root, key="workflow")
+    arch_wf = verify_cd_workflow_common(arch_wf_path, env_secrets, pre["required_secret"])
     arch_build = job_block(arch_wf, "build")
     image = re.search(r"^\s+image: (\S+)$", arch_build, re.M)
     if not image or not re.fullmatch(r"archlinux:base-devel@sha256:[0-9a-f]{64}", image.group(1)):
         raise SystemExit("Arch build container must be archlinux:base-devel pinned by digest")
     if f"CONTAINER_IMAGE: {image.group(1)}" not in arch_build:
         raise SystemExit("Arch build CONTAINER_IMAGE must match the pinned container image")
+
+    cd_release_wf_path = verify_prerelease_metadata(pre, config, root, key="multi_distro_workflow")
+    cd_release_wf = verify_cd_workflow_common(cd_release_wf_path, env_secrets, single_secret_clobber=None)
+    cd_arch_build = job_block(cd_release_wf, "build-archlinux")
+    if not re.search(r"^\s+image: archlinux:base-devel@sha256:[0-9a-f]{64}$", cd_arch_build, re.M):
+        raise SystemExit("cd-release.yml build-archlinux container must be archlinux:base-devel pinned by digest")
+    if "https://cdn.komawm.org" not in cd_release_wf or "./node_modules/.bin/wrangler" not in cd_release_wf:
+        raise SystemExit("cd-release.yml must upload to https://cdn.komawm.org via ./node_modules/.bin/wrangler")
 
     matrix = pre.get("matrix")
     if not isinstance(matrix, dict) or matrix.get("channels") != [
@@ -424,14 +621,19 @@ def verify_workflows(root: Path, config: dict) -> None:
         "homebrew",
     ]:
         raise SystemExit("[development_prerelease.matrix] must declare the multi-distro channels")
-    matrix_wf_path = verify_prerelease_metadata(matrix, config, root)
-    matrix_wf = verify_workflow_common(matrix_wf_path, matrix["required_secret"])
+    matrix_wf_path = verify_prerelease_metadata(matrix, config, root, key="workflow")
+    matrix_wf = verify_cd_workflow_common(matrix_wf_path, env_secrets, matrix["required_secret"])
     for container_job, expected_prefix in (("build-rpm", "fedora:"), ("build-alpine", "alpine:")):
         block = job_block(matrix_wf, container_job)
         if f"CONTAINER_IMAGE: {expected_prefix}" not in block or "docker run" not in block:
             raise SystemExit(f"Matrix job {container_job} must run in a digest-pinned {expected_prefix} container")
 
-    declared = {arch_wf_path.resolve(), matrix_wf_path.resolve()}
+    declared = {
+        ci_wf_path.resolve(),
+        arch_wf_path.resolve(),
+        cd_release_wf_path.resolve(),
+        matrix_wf_path.resolve(),
+    }
     on_disk = sorted((root / ".github/workflows").glob("*.yml"))
     for wf_path in on_disk:
         if wf_path.resolve() not in declared:

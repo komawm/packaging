@@ -36,26 +36,29 @@ delivery becomes a task only after its runtime exists and is accepted.
 
 `just check` runs `scripts/verify.py` (TOML, Python AST, canonical links, secret
 scan, placeholder/license validation, disposable smoke rendering across all
-target distros, syntax checks, and CD workflow invariants), `shellcheck` across
-shell templates, CI container scripts, and `vm/*.sh`, and `actionlint` across
-`.github/workflows/*.yml`. This repository does not require generic CI, CodeQL,
-bot review, or an Issue/PR workflow.
+target distros, nFPM/APT/Dependabot validation, syntax checks, and CD workflow
+invariants), `shellcheck` across shell templates, `apt/setup.sh`, CI container
+scripts, and `vm/*.sh`, and `actionlint` across `.github/workflows/*.yml`.
+[ci.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/ci.yml)
+runs these same checks on pushes and pull requests to `main`.
 
 ## Development prerelease CD (`v0.0.x`)
 
-Both [cd-archlinux.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-archlinux.yml)
-and [cd-release-matrix.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-release-matrix.yml)
-build packages for an existing product development tag and can attach them to
-that product's existing GitHub Release. Both are `workflow_dispatch` only; there
-is no push, tag, or schedule trigger. A development prerelease is not
-acceptance: `accepted = false` and `first_accepted_version = "0.1.0"` stay in
+Three manually dispatched (`workflow_dispatch`-only) workflows handle builds
+and guarded publishing:
+[cd-archlinux.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-archlinux.yml),
+[cd-release.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-release.yml),
+and [cd-release-matrix.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-release-matrix.yml).
+There is no push, tag, or schedule trigger for publishing. A development
+prerelease is not acceptance: `accepted = false` and
+`first_accepted_version = "0.1.0"` stay in
 [packaging.toml](https://github.com/komawm/packaging/blob/main/packaging.toml).
 
 ### Arch Linux workflow (`cd-archlinux.yml`)
 
 | Input | Meaning |
 | --- | --- |
-| `product` | Product repository under `komawm` (currently only `koma`) |
+| `product` | Product repository under `komawm` (`koma` or `jiku`) |
 | `tag` | Existing product tag such as `v0.0.1`; must match `v0.MINOR.PATCH` |
 | `publish` | `false` (default) builds only; `true` also runs the `publish` job |
 
@@ -63,12 +66,53 @@ The `build` job runs in a digest-pinned `archlinux:base-devel` container with
 read-only token permissions. It resolves the tag to a full 40-character commit
 (dereferencing annotated tags), downloads
 `https://github.com/komawm/<product>/archive/<commit>.tar.gz`, computes its
-SHA-256, renders the PKGBUILD with `scripts/render_arch.py`, and runs
-`makepkg --syncdeps --noconfirm` as an unprivileged `builder` user. `namcap`
-output is logged but non-fatal. The `archlinux-package` workflow artifact holds
-the package, rendered `PKGBUILD`, `namcap.log`, `SHA256SUMS-archlinux`, and
-`PACKAGE-MANIFEST.toml` (product, tag, commit, source SHA-256, package filename
-and SHA-256, build time, container digest, packaging commit, run URL).
+SHA-256, renders `archlinux/PKGBUILD.in` (`koma`) or
+`archlinux/PKGBUILD.jiku.in` (`jiku`) with `scripts/render_arch.py --product <product>`,
+and runs `makepkg --syncdeps --noconfirm` as an unprivileged `builder` user.
+`namcap` output is logged but non-fatal. The `archlinux-<product>-package`
+workflow artifact holds the package, rendered `PKGBUILD`, `namcap.log`,
+`SHA256SUMS-archlinux`, and `PACKAGE-MANIFEST.toml` (product, tag, commit,
+source SHA-256, package filename and SHA-256, build time, container digest,
+packaging commit, run URL).
+
+### Unified R2 CDN & nFPM workflow (`cd-release.yml`)
+
+| Input | Meaning |
+| --- | --- |
+| `product` | Product repository under `komawm` (`koma` or `jiku`) |
+| `tag` | Existing product tag matching `v[0-9]+.[0-9]+.[0-9]+` (optional `-pre` suffix) |
+| `channel` | Release channel (`dev` default, or `stable`) |
+| `publish_r2` | `false` (default) skips upload; `true` uploads release bundles, pointers, and APT metadata to Cloudflare R2 (`https://cdn.komawm.org`) |
+| `publish_github` | `false` (default) skips GitHub Release upload; `true` attaches `.tar.zst`, `.deb`, `.rpm`, `.apk`, `.pkg.tar.zst`, and `SHA256SUMS-linux-packages` to `komawm/<product>` |
+| `publish_distros` | `false` (default) skips AUR/Copr/Cachix sync; `true` (on `channel=stable`) updates AUR `<product>-bin`, triggers Fedora Copr, and prepares Nix Cachix push when upstream carries `flake.nix` |
+
+The workflow compiles Linux binaries across `x86_64` (`ubuntu-24.04`) and
+`aarch64` (`ubuntu-24.04-arm`), builds native Arch `.pkg.tar.zst` in
+`archlinux:base-devel`, packages `.deb`, `.rpm`, and `.apk` via
+[nfpm/koma.yaml](https://github.com/komawm/packaging/blob/main/nfpm/koma.yaml)
+and [nfpm/jiku.yaml](https://github.com/komawm/packaging/blob/main/nfpm/jiku.yaml),
+and aggregates SHA-256 manifests.
+
+#### Cloudflare R2 CDN layout (`https://cdn.komawm.org`, bucket `komawm`)
+
+- `releases/<product>/<tag>/`: immutable release tarballs, `.deb`, `.rpm`,
+  `.apk`, `.pkg.tar.zst`, and sorted `SHA256SUMS` (`max-age=31536000, immutable`).
+- `install/<product>/latest.txt` (`channel=stable`) and
+  `install/<product>/latest-dev.txt` (`channel=dev`): short-TTL (`max-age=300`)
+  tag pointers.
+- `apt/`: GPG-signed deb822 APT repository refreshed on `channel=stable` when
+  `APT_GPG_PRIVATE_KEY` is configured (`apt/komawm-archive-keyring.gpg`,
+  `apt/komawm.sources`, `apt/setup.sh`, `apt/pool/main/*.deb` preserving both
+  `koma` and `jiku` `.deb` packages, and `apt/dists/stable/...` signed with
+  `Release.gpg` + `InRelease`).
+
+#### Nix `flake.nix` delegation
+
+`komawm/koma` owns any upstream root `flake.nix`. In `cd-release.yml`,
+`resolve` checks whether `komawm/<product>@<commit>` ships a root `flake.nix`
+(`has_flake`); `packaging` delegates Nix/Cachix binary cache pushes to that
+upstream flake while retaining out-of-tree template evaluation in
+`cd-release-matrix.yml` (`validate-nix`).
 
 ### Multi-distro matrix workflow (`cd-release-matrix.yml`)
 
@@ -136,18 +180,22 @@ packaging CD only after that release exists.
 
 ### GitHub Actions Secrets and `release` environment variables
 
-All credentials MUST be scoped to the protected `release` environment in
-`komawm/packaging` and MUST NOT be passed to build or validation jobs.
+All credentials MUST be scoped centrally to the protected `release` environment
+in `komawm/packaging` (shared across `koma` and `jiku` CD workflows) and MUST NOT
+be passed to build or validation jobs.
 
 | Secret / Variable | Scope | Purpose | Status in `v0.0.x` |
 | --- | --- | --- | --- |
-| `PRODUCT_RELEASE_TOKEN` (Secret) | `release` environment | Fine-grained PAT or GitHub App token with `Contents: Read and write` on `komawm/koma` (and `komawm/jiku` after acceptance) for `gh release upload` | **Required when `publish=true`** |
-| `AUR_SSH_PRIVATE_KEY` (Secret) | `release` environment | SSH deploy key for pushing accepted Arch `PKGBUILD`/`.SRCINFO` updates to AUR | Reserved for post-`v0.1.0` acceptance |
-| `APT_GPG_PRIVATE_KEY` (Secret) | `release` environment | Armored PGP signing key for signing accepted APT `Release.gpg` / `InRelease` metadata | Reserved for post-`v0.1.0` acceptance |
-| `COPR_CONFIG` (Secret) | `release` environment | Fedora COPR API token INI configuration (`~/.config/copr`) for submitting accepted SRPM builds | Reserved for post-`v0.1.0` acceptance |
+| `CLOUDFLARE_ACCOUNT_ID` (Secret) | `release` environment | Cloudflare account ID for R2 bucket `komawm` (`https://cdn.komawm.org`) uploads via Wrangler in `cd-release.yml` | **Required when `publish_r2=true`** |
+| `CLOUDFLARE_API_TOKEN` (Secret) | `release` environment | Scoped Cloudflare R2 Object Write API token for bucket `komawm` | **Required when `publish_r2=true`** |
+| `PRODUCT_RELEASE_TOKEN` (Secret) | `release` environment | Fine-grained PAT or GitHub App token with `Contents: Read and write` on `komawm/koma` and `komawm/jiku` for `gh release upload` | **Required when `publish=true` or `publish_github=true`** |
+| `GH_PAT` (Secret) | `release` environment | Optional fallback cross-repo release upload token accepted by `cd-release.yml` when `PRODUCT_RELEASE_TOKEN` is unset | Optional fallback (`publish_github=true`) |
+| `APT_GPG_PRIVATE_KEY` (Secret) | `release` environment | Armored PGP private signing key for signing R2 APT `Release.gpg`, `InRelease`, and exporting `komawm-archive-keyring.gpg` | Optional on `channel=stable` / Post-`v0.1.0` |
+| `AUR_SSH_PRIVATE_KEY` (Secret) | `release` environment | SSH deploy key for pushing `koma-bin` / `jiku-bin` `PKGBUILD` updates to `aur.archlinux.org` | Optional on `channel=stable` / Post-`v0.1.0` |
+| `COPR_CONFIG` (Secret) | `release` environment | Fedora Copr API token INI configuration (`~/.config/copr`) for submitting `komawm/<product>` SCM builds | Optional on `channel=stable` / Post-`v0.1.0` |
+| `CACHIX_AUTH_TOKEN` (Secret) | `release` environment | Cachix upload token for pushing Nix derivation closures when upstream `komawm/<product>` ships `flake.nix` | Reserved for upstream `flake.nix` / Post-`v0.1.0` |
 | `HOMEBREW_TAP_TOKEN` (Secret) | `release` environment | Fine-grained token scoped strictly to `komawm/homebrew-tap` to update accepted formula commits | Reserved for post-`v0.1.0` acceptance |
-| `CACHIX_AUTH_TOKEN` (Secret) | `release` environment | Cachix upload token for pushing accepted Nix derivation closures | Reserved for post-`v0.1.0` acceptance |
-| `KOMA_COPR_PROJECT`, `KOMA_APT_SUITE`, `KOMA_CACHIX_CACHE`, `KOMA_HOMEBREW_TAP_REPO` (Environment Variables) | `release` environment | Non-secret target coordinates for optional downstream channel publishing after `v0.1.0` | Optional / Reserved for post-`v0.1.0` |
+| `KOMA_COPR_PROJECT`, `KOMA_APT_SUITE`, `KOMA_CACHIX_CACHE`, `KOMA_HOMEBREW_TAP_REPO` (Environment Variables) | `release` environment | Non-secret target coordinates for optional downstream channel publishing | Optional |
 
 Unaccepted `v0.0.x` builds intentionally restrict publishing to `komawm/<product>`
 GitHub Releases via `PRODUCT_RELEASE_TOKEN` and never push to external package

@@ -1,0 +1,39 @@
+# UNACCEPTED integration template for Jiku. Rendering does not approve build/publication.
+# shellcheck shell=bash
+pkgname=jiku
+pkgver='@VERSION@'
+pkgrel=1
+pkgdesc='Desktop orchestration daemon, CLI/MCP controller, and SQLite FTS5 memory companion for Koma'
+arch=('x86_64')
+url='https://komawm.org/jiku/'
+license=('GPL-3.0-or-later')
+depends=('gcc-libs' 'glibc' 'ca-certificates')
+makedepends=('rustup' 'pkgconf')
+optdepends=('koma: Wayland tiling compositor host' 'libnotify: desktop alert notifications' 'bubblewrap: outer filesystem sandbox')
+options=('!debug')
+_source_commit='@SOURCE_COMMIT@'
+source=("jiku-${_source_commit}.tar.gz::https://github.com/komawm/jiku/archive/${_source_commit}.tar.gz")
+sha256sums=('@SOURCE_SHA256@')
+
+build() {
+    cd "jiku-${_source_commit}" || return 1
+    if [[ ! -f Cargo.lock ]]; then
+        printf '%s\n' 'Release build requires a reviewed, committed Cargo.lock' >&2
+        return 1
+    fi
+    local channel
+    channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
+    rustup toolchain install --profile minimal "$channel"
+    cargo build --release --locked --package jikud --package jiku
+}
+
+package() {
+    cd "jiku-${_source_commit}" || return 1
+    install -Dm755 target/release/jikud "$pkgdir/usr/bin/jikud"
+    install -Dm755 target/release/jiku "$pkgdir/usr/bin/jiku"
+    install -Dm644 resources/jikud.service "$pkgdir/usr/lib/systemd/user/jikud.service"
+    install -Dm644 examples/config.toml "$pkgdir/usr/share/doc/jiku/examples/config.toml"
+    install -Dm644 examples/init.lua "$pkgdir/usr/share/doc/jiku/examples/init.lua"
+    install -Dm644 skills/SKILL.md "$pkgdir/usr/share/doc/jiku/skills/SKILL.md"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/jiku/LICENSE"
+}

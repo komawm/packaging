@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=https://nfpm.goreleaser.com/schema.json
+# nFPM v2 package specification for Jiku (Desktop orchestration daemon & CLI/MCP companion for Koma).
+# Koma runs standalone without Jiku; Jiku is packaged independently and recommends `koma`.
+name: jiku
+arch: ${PKG_ARCH}
+platform: linux
+version: ${PKG_VERSION}
+version_schema: semver
+release: 1
+section: utils
+priority: optional
+maintainer: Koma Maintainers <noreply@komawm.org>
+vendor: komawm
+homepage: https://komawm.org/jiku/
+license: GPL-3.0-or-later
+description: |
+  Desktop orchestration daemon (jikud), CLI/MCP controller (jiku), three-tier SQLite WAL+FTS5 memory,
+  and companion TTS/notification hooks built to pair with the Koma Wayland compositor.
+
+umask: 0o002
+
+contents:
+  - src: ${PKG_SRC_ROOT}/target/release/jikud
+    dst: /usr/bin/jikud
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${PKG_SRC_ROOT}/target/release/jiku
+    dst: /usr/bin/jiku
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${PKG_SRC_ROOT}/resources/jikud.service
+    dst: /usr/lib/systemd/user/jikud.service
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/examples/config.toml
+    dst: /usr/share/doc/jiku/examples/config.toml
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/examples/init.lua
+    dst: /usr/share/doc/jiku/examples/init.lua
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/skills/SKILL.md
+    dst: /usr/share/doc/jiku/skills/SKILL.md
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/LICENSE
+    dst: /usr/share/licenses/jiku/LICENSE
+    expand: true
+    file_info:
+      mode: 0644
+
+overrides:
+  deb:
+    depends:
+      - libc6
+      - ca-certificates
+    recommends:
+      - koma
+      - libnotify-bin
+      - bubblewrap
+  rpm:
+    depends:
+      - glibc
+      - ca-certificates
+    recommends:
+      - koma
+      - libnotify
+      - bubblewrap
+  apk:
+    depends:
+      - gcompat
+      - ca-certificates
+
+deb:
+  compression: zstd
+  fields:
+    Bugs: https://github.com/komawm/jiku/issues
+
+rpm:
+  compression: zstd
+  summary: Standalone GUI orchestration daemon and MCP companion for Koma

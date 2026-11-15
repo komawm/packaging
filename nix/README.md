@@ -6,14 +6,17 @@ provides `koma.nix.in` and `flake.nix.in` for evaluating and building
 (including NixOS on Apple Silicon M1–M4) from an immutable commit and tarball
 checksum without inventing hashes.
 
-## Upstream `flake.nix` status
+## Upstream `flake.nix` status and delegation
 
-[komawm/koma](https://github.com/komawm/koma) does not currently ship a root
-`flake.nix`. This directory provides an out-of-tree flake template pinned to an
-immutable `@SOURCE_COMMIT@` (`koma-src.flake = false`) and a standalone
-`koma.nix` derivation verifying `@SOURCE_SHA256@`. When an upstream root
-`flake.nix` is added to `komawm/koma`, `packaging` can track pinned `flake.lock`
-inputs directly.
+[komawm/koma](https://github.com/komawm/koma) owns any future root `flake.nix`
+for upstream Nix/Cachix builds. Until a root `flake.nix` exists upstream, this
+directory provides an out-of-tree flake template pinned to an immutable
+`@SOURCE_COMMIT@` (`koma-src.flake = false`) and a standalone `koma.nix`
+derivation verifying `@SOURCE_SHA256@`, validated in
+[cd-release-matrix.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-release-matrix.yml).
+In [cd-release.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/cd-release.yml),
+`packaging` delegates Nix/Cachix binary cache pushes to the product repository's
+own `flake.nix` whenever upstream `komawm/<product>` ships one.
 
 Because `Cargo.toml` references Git dependencies (`phodopus`, `smithay`),
 `koma.nix.in` sets `cargoLock.allowBuiltinFetchGit = true` and honors the
