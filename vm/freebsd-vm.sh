@@ -193,7 +193,7 @@ ensure_evidence_dir() {
 
 proxy_env_prefix() {
     if [[ -n "$VM_GUEST_PROXY" ]]; then
-        printf 'export http_proxy=%q https_proxy=%q HTTP_PROXY=%q HTTPS_PROXY=%q no_proxy=%q NO_PROXY=%q\n' \
+        printf 'export http_proxy=%q https_proxy=%q HTTP_PROXY=%q HTTPS_PROXY=%q no_proxy=%q NO_PROXY=%q' \
             "$VM_GUEST_PROXY" "$VM_GUEST_PROXY" "$VM_GUEST_PROXY" "$VM_GUEST_PROXY" \
             "127.0.0.1,localhost,10.0.2.2" "127.0.0.1,localhost,10.0.2.2"
     fi
@@ -230,7 +230,7 @@ run_ssh() {
     env_prefix="$(proxy_env_prefix)"
     # shellcheck disable=SC2029 # Intentional client-side proxy env and remote command string.
     if [[ -n "$env_prefix" ]]; then
-        ssh "${opts[@]}" "${user}@127.0.0.1" "${env_prefix}$*"
+        ssh "${opts[@]}" "${user}@127.0.0.1" "${env_prefix}; $*"
     else
         ssh "${opts[@]}" "${user}@127.0.0.1" "$*"
     fi
@@ -311,9 +311,19 @@ PasswordAuthentication no
 UseDNS no
 __KOMA_SSHD__
 
-if [ -f /usr/local/etc/pkg/repos/FreeBSD.conf ]; then
-    printf 'FreeBSD-base: { enabled: no }\n' > /usr/local/etc/pkg/repos/FreeBSD.conf
-fi
+mkdir -p /usr/local/etc/pkg/repos
+rm -f /usr/local/etc/pkg/repos/FreeBSD.conf
+cat <<'__KOMA_PKG_REPO__' > /usr/local/etc/pkg/repos/99-koma-vm.conf
+FreeBSD-ports: { enabled: no }
+FreeBSD-ports-kmods: { enabled: no }
+FreeBSD-base: { enabled: no }
+FreeBSD: {
+  url: "https://pkg.FreeBSD.org/${ABI}/latest",
+  signature_type: "fingerprints",
+  fingerprints: "/usr/share/keys/pkg",
+  enabled: yes
+}
+__KOMA_PKG_REPO__
 
 ssh-keygen -A
 EOF
@@ -354,6 +364,12 @@ fi
 mkdir -p /tmp/bsdinstall_etc /tmp/bsdinstall_boot
 
 bsdinstall script /tmp/seed/inst.cfg </dev/null
+
+sync
+if [ -x /sbin/zpool ]; then
+    zpool export zroot 2>/dev/null || zpool export -f zroot 2>/dev/null || true
+fi
+sync
 
 trap - EXIT
 echo "===FREEBSD_INSTALL_DONE==="
@@ -551,12 +567,29 @@ try:
     )
     conn.sendall(bootstrap.encode("ascii"))
     wait_for([r"^===FREEBSD_INSTALL_DONE===\s*$"], timeout=1800.0, label="===FREEBSD_INSTALL_DONE===")
+    wait_for(
+        [r"(?:^|\n)(?:root@[^\n#]*#\s*|#\s*)$"],
+        timeout=15.0,
+        label="post-install # prompt",
+        idle_poke=b"\r",
+    )
 
-    time.sleep(1.0)
-    conn.sendall(b"poweroff\r")
-    proc.wait(timeout=90)
+    conn.sendall(b"sync; halt -p -q\r")
+    shutdown_start = time.monotonic()
+    sent_fallback = False
+    while proc.poll() is None:
+        if time.monotonic() - shutdown_start >= 90.0:
+            raise TimeoutError(
+                f"QEMU did not power off after halt -p -q\n--- tail ---\n{clean_buf[-1500:]}"
+            )
+        if not sent_fallback and (time.monotonic() - shutdown_start) >= 15.0:
+            conn.sendall(b"\rpoweroff -q\r")
+            sent_fallback = True
+        pump(0.5)
+
+    proc.wait(timeout=5)
     if proc.returncode != 0:
-        raise RuntimeError(f"QEMU exited with code {proc.returncode} after poweroff")
+        raise RuntimeError(f"QEMU exited with code {proc.returncode} after halt")
 except Exception:
     proc.terminate()
     try:
@@ -687,12 +720,26 @@ cmd_provision() {
     log "provisioning FreeBSD packages and sudo configuration"
     run_ssh "set -eu
         export ASSUME_ALWAYS_YES=yes
-        pkg -N >/dev/null 2>&1 || pkg bootstrap -y
+        export BATCH=yes
+        mkdir -p /usr/local/etc/pkg/repos
+        rm -f /usr/local/etc/pkg/repos/FreeBSD.conf
+        cat <<'__KOMA_PKG_REPO__' > /usr/local/etc/pkg/repos/99-koma-vm.conf
+FreeBSD-ports: { enabled: no }
+FreeBSD-ports-kmods: { enabled: no }
+FreeBSD-base: { enabled: no }
+FreeBSD: {
+  url: \"https://pkg.FreeBSD.org/\${ABI}/latest\",
+  signature_type: \"fingerprints\",
+  fingerprints: \"/usr/share/keys/pkg\",
+  enabled: yes
+}
+__KOMA_PKG_REPO__
+        pkg -N >/dev/null 2>&1 || pkg bootstrap -f
         pkg update -f
         pkg install -y \
-            pkgconf git curl ca_root_nss sudo \
+            pkgconf git curl ca_root_nss sudo python3 \
             dbus libdrm fontconfig libinput \
-            seatd libudev-devd wayland libxkbcommon mesa-libs rust
+            seatd libudev-devd wayland libxkbcommon mesa-libs mesa-dri pixman sqlite3
         pkg install -y rustup-init || true
         mkdir -p /usr/local/etc/sudoers.d
         printf '%s\n' '%wheel ALL=(ALL:ALL) NOPASSWD: ALL' > /usr/local/etc/sudoers.d/wheel
@@ -761,16 +808,20 @@ cmd_koma_check() {
         fi
         if [ \"\$need_rustup\" -eq 1 ]; then
             target_tc=\"\${req_channel:-stable}\"
+            rustup_ok=1
             if ! command -v rustup >/dev/null 2>&1; then
                 if command -v rustup-init >/dev/null 2>&1; then
-                    rustup-init -y --no-modify-path --profile minimal --default-toolchain \"\$target_tc\"
+                    rustup-init -y --no-modify-path --profile minimal --default-toolchain \"\$target_tc\" || rustup_ok=0
                 else
-                    curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain \"\$target_tc\"
+                    curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain \"\$target_tc\" || rustup_ok=0
                 fi
                 export PATH=\"\$HOME/.cargo/bin:\$PATH\"
             else
-                rustup toolchain install \"\$target_tc\" --profile minimal
-                rustup override set \"\$target_tc\"
+                rustup toolchain install \"\$target_tc\" --profile minimal || rustup_ok=0
+                rustup override set \"\$target_tc\" || rustup_ok=0
+            fi
+            if [ \"\$rustup_ok\" -eq 0 ] || ! command -v cargo >/dev/null 2>&1; then
+                env ASSUME_ALWAYS_YES=yes BATCH=yes pkg install -y rust
             fi
         fi
         uname -a
