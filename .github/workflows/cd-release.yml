@@ -592,15 +592,18 @@ jobs:
           fi
           export GH_TOKEN="$token"
           cp release-bundle/SHA256SUMS "release-bundle/SHA256SUMS-linux-packages"
-          gh release upload "$TAG" \
-            release-bundle/*.tar.zst \
-            release-bundle/*.deb \
-            release-bundle/*.rpm \
-            release-bundle/*.apk \
-            release-bundle/*.pkg.tar.zst \
-            "release-bundle/${PRODUCT}.rb" \
-            release-bundle/SHA256SUMS-linux-packages \
-            --repo "komawm/$PRODUCT" --clobber
+          shopt -s nullglob
+          mapfile -t gh_assets < <(
+            printf '%s\n' \
+              release-bundle/*.tar.zst \
+              release-bundle/*.deb \
+              release-bundle/*.rpm \
+              release-bundle/*.apk \
+              release-bundle/*.pkg.tar.zst \
+              "release-bundle/${PRODUCT}.rb" \
+              release-bundle/SHA256SUMS-linux-packages | LC_ALL=C sort -u
+          )
+          gh release upload "$TAG" "${gh_assets[@]}" --repo "komawm/$PRODUCT" --clobber
 
       - name: Sync AUR prebuilt binaries, Fedora Copr and optional Nix Cachix
         if: ${{ inputs.publish_distros }}
