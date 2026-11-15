@@ -175,7 +175,7 @@ jobs:
             rust_target: aarch64-unknown-linux-gnu
             nfpm_arch: arm64
             rpm_arch: aarch64
-            rustflags: "-C link-arg=-Wl,-z,max-page-size=16384"
+            rustflags: "-C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,common-page-size=16384"
     env:
       PRODUCT: ${{ inputs.product }}
       VERSION: ${{ needs.resolve.outputs.version }}
@@ -183,6 +183,7 @@ jobs:
       SOURCE_SHA256: ${{ needs.resolve.outputs.source_sha256 }}
       RUST_TARGET: ${{ matrix.rust_target }}
       NFPM_ARCH: ${{ matrix.nfpm_arch }}
+      RPM_ARCH: ${{ matrix.rpm_arch }}
       RUSTFLAGS: ${{ matrix.rustflags }}
       NFPM_VERSION: "2.48.0"
     steps:
@@ -282,17 +283,17 @@ jobs:
           tar --sort=name --owner=0 --group=0 --numeric-owner \
             -C "$STAGE_DIR" -cf - "$bundle_name" \
             | zstd -19 -T0 -o "$OUT_DIR/${bundle_name}.tar.zst"
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+            -C "$STAGE_DIR" -cf - "$bundle_name" \
+            | gzip -9n > "$OUT_DIR/${bundle_name}.tar.gz"
 
-          # Stage nFPM root and build .deb, .rpm, and .apk
+          # Stage nFPM root and build .deb, .rpm, and .apk with deterministic filenames
           export PKG_VERSION="$VERSION"
           export PKG_ARCH="$NFPM_ARCH"
           export PKG_SRC_ROOT="$src_root"
-          for fmt in deb rpm apk; do
-            nfpm package \
-              --config "nfpm/${PRODUCT}.yaml" \
-              --packager "$fmt" \
-              --target "$OUT_DIR/"
-          done
+          nfpm package --config "nfpm/${PRODUCT}.yaml" --packager deb --target "$OUT_DIR/${PRODUCT}_${VERSION}-1_${NFPM_ARCH}.deb"
+          nfpm package --config "nfpm/${PRODUCT}.yaml" --packager rpm --target "$OUT_DIR/${PRODUCT}-${VERSION}-1.${RPM_ARCH}.rpm"
+          nfpm package --config "nfpm/${PRODUCT}.yaml" --packager apk --target "$OUT_DIR/${PRODUCT}_${VERSION}_linux_${NFPM_ARCH}.apk"
 
           (cd "$OUT_DIR" && sha256sum ./* > "SHA256SUMS-${NFPM_ARCH}")
           ls -lh "$OUT_DIR"
@@ -458,10 +459,20 @@ jobs:
             sha256sum --check --strict "$sumfile"
           done
           shopt -s nullglob
-          for asset in ./*.tar.zst ./*.deb ./*.rpm ./*.apk ./*.pkg.tar.zst; do
+          for asset in ./*.tar.zst ./*.tar.gz ./*.deb ./*.rpm ./*.apk ./*.pkg.tar.zst; do
             cp "$asset" ../release-bundle/
           done
           popd >/dev/null
+          gz_x86_64="$(sha256sum "release-bundle/${PRODUCT}-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" | cut -d' ' -f1)"
+          gz_aarch64="$(sha256sum "release-bundle/${PRODUCT}-${VERSION}-aarch64-unknown-linux-gnu.tar.gz" | cut -d' ' -f1)"
+          python3 scripts/render_homebrew_bin.py \
+            --product "$PRODUCT" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --sha256-x86_64 "$gz_x86_64" \
+            --sha256-aarch64 "$gz_aarch64" \
+            --cdn-origin "$CDN_ORIGIN" \
+            --output "release-bundle/${PRODUCT}.rb"
           (cd release-bundle && sha256sum ./* | sort -k2 > SHA256SUMS)
           cat release-bundle/SHA256SUMS
 
@@ -487,37 +498,43 @@ jobs:
           for f in release-bundle/*; do
             base="$(basename "$f")"
             ctype="application/octet-stream"
-            if [[ "$base" == "SHA256SUMS" ]]; then
+            if [[ "$base" == "SHA256SUMS" || "$base" == *.rb ]]; then
               ctype="text/plain; charset=utf-8"
             fi
             r2_put "releases/${PRODUCT}/${TAG}/${base}" "$f" "$ctype" "public, max-age=31536000, immutable"
           done
 
-          # 2. Update install pointer only on stable releases (or latest-dev.txt on development)
+          # 2. Update install pointers & prebuilt Linuxbrew formula (keep v0.0.* installable until a non-v0.0.x stable exists)
           ptr_file="$(mktemp)"
           printf '%s\n' "$TAG" > "$ptr_file"
-          if [[ "$CHANNEL" == "stable" ]]; then
-            r2_put "install/${PRODUCT}/latest.txt" "$ptr_file" "text/plain; charset=utf-8" "public, max-age=300"
-          else
+          if [[ "$CHANNEL" != "stable" ]]; then
             r2_put "install/${PRODUCT}/latest-dev.txt" "$ptr_file" "text/plain; charset=utf-8" "public, max-age=300"
+          fi
+          existing_latest="$(curl -fsSL "${CDN_ORIGIN}/install/${PRODUCT}/latest.txt" 2>/dev/null | tr -d '[:space:]' || true)"
+          if [[ "$CHANNEL" == "stable" || -z "$existing_latest" || "$existing_latest" == v0.0.* ]]; then
+            r2_put "install/${PRODUCT}/latest.txt" "$ptr_file" "text/plain; charset=utf-8" "public, max-age=300"
+            r2_put "install/${PRODUCT}/${PRODUCT}.rb" "release-bundle/${PRODUCT}.rb" "text/plain; charset=utf-8" "public, max-age=300"
           fi
           rm -f "$ptr_file"
 
-          # 3. Refresh GPG-signed deb822 APT repository on R2 when APT_GPG_PRIVATE_KEY is present and channel is stable
-          if [[ "$CHANNEL" == "stable" && -n "${APT_GPG_PRIVATE_KEY:-}" ]]; then
+          # 3. Refresh GPG-signed deb822 APT repository on R2 whenever APT_GPG_PRIVATE_KEY is configured
+          if [[ -n "${APT_GPG_PRIVATE_KEY:-}" ]]; then
             sudo apt-get update
             sudo apt-get install --no-install-recommends -y dpkg-dev apt-utils gnupg
             gnupg_home="$(mktemp -d)"
             chmod 0700 "$gnupg_home"
             export GNUPGHOME="$gnupg_home"
-            printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+            printf '%s\n' "$APT_GPG_PRIVATE_KEY" | tr -d '\r' | gpg --batch --import
             apt_root="$(mktemp -d)"
             install -d "$apt_root/pool/main" "$apt_root/dists/stable/main/binary-amd64" "$apt_root/dists/stable/main/binary-arm64"
 
-            # Preserve existing other-product .deb files already in R2 pool if present
+            # Preserve existing other-product .deb files already in R2 pool or releases/
             for other in koma jiku; do
               if [[ "$other" != "$PRODUCT" ]]; then
-                other_tag="$(curl -fsSL "${CDN_ORIGIN}/install/${other}/latest.txt" 2>/dev/null || true)"
+                other_tag="$(curl -fsSL "${CDN_ORIGIN}/install/${other}/latest.txt" 2>/dev/null | tr -d '[:space:]' || true)"
+                if [[ -z "$other_tag" ]]; then
+                  other_tag="$(curl -fsSL "${CDN_ORIGIN}/install/${other}/latest-dev.txt" 2>/dev/null | tr -d '[:space:]' || true)"
+                fi
                 if [[ -n "$other_tag" ]]; then
                   other_sums="$(curl -fsSL "${CDN_ORIGIN}/releases/${other}/${other_tag}/SHA256SUMS" 2>/dev/null || true)"
                   for a in amd64 arm64; do
@@ -525,8 +542,9 @@ jobs:
                     if [[ -z "$deb_name" ]]; then
                       deb_name="${other}_${other_tag#v}-1_${a}.deb"
                     fi
-                    curl -fsSL "${CDN_ORIGIN}/apt/pool/main/${deb_name}" \
-                      -o "$apt_root/pool/main/${deb_name}" 2>/dev/null || true
+                    curl -fsSL "${CDN_ORIGIN}/apt/pool/main/${deb_name}" -o "$apt_root/pool/main/${deb_name}" 2>/dev/null \
+                      || curl -fsSL "${CDN_ORIGIN}/releases/${other}/${other_tag}/${deb_name}" -o "$apt_root/pool/main/${deb_name}" 2>/dev/null \
+                      || true
                   done
                 fi
               fi
@@ -580,63 +598,49 @@ jobs:
             release-bundle/*.rpm \
             release-bundle/*.apk \
             release-bundle/*.pkg.tar.zst \
+            "release-bundle/${PRODUCT}.rb" \
             release-bundle/SHA256SUMS-linux-packages \
             --repo "komawm/$PRODUCT" --clobber
 
-      - name: Sync AUR, Fedora Copr and optional Nix Cachix on stable channel
-        if: ${{ inputs.publish_distros && inputs.channel == 'stable' }}
+      - name: Sync AUR prebuilt binaries, Fedora Copr and optional Nix Cachix
+        if: ${{ inputs.publish_distros }}
         run: |
           set -euo pipefail
-          # 1. AUR binary recipe (<product>-bin)
+          # 1. AUR multi-arch binary recipe (<product>-bin)
           if [[ -n "${AUR_SSH_PRIVATE_KEY:-}" ]]; then
+            zst_x86_64="$(sha256sum "release-bundle/${PRODUCT}-${VERSION}-x86_64-unknown-linux-gnu.tar.zst" | cut -d' ' -f1)"
+            zst_aarch64="$(sha256sum "release-bundle/${PRODUCT}-${VERSION}-aarch64-unknown-linux-gnu.tar.zst" | cut -d' ' -f1)"
             ssh_dir="$(mktemp -d)"
             chmod 0700 "$ssh_dir"
-            printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$ssh_dir/aur"
+            printf '%s\n' "$AUR_SSH_PRIVATE_KEY" | tr -d '\r' > "$ssh_dir/aur"
             chmod 0600 "$ssh_dir/aur"
             ssh-keyscan -H aur.archlinux.org >> "$ssh_dir/known_hosts" 2>/dev/null
             export GIT_SSH_COMMAND="ssh -i $ssh_dir/aur -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
             aur_repo="$(mktemp -d)"
-            if git clone "ssh://aur@aur.archlinux.org/${PRODUCT}-bin.git" "$aur_repo"; then
-              shopt -s nullglob
-              pkg_zsts=(release-bundle/*.pkg.tar.zst)
-              pkg_zst="${pkg_zsts[0]:-}"
-              if [[ -z "$pkg_zst" ]]; then
-                echo "::error::No Arch .pkg.tar.zst artifact found in release-bundle"
-                exit 1
-              fi
-              pkg_sha="$(sha256sum "$pkg_zst" | cut -d' ' -f1)"
-              pkg_base="$(basename "$pkg_zst")"
-              cat > "$aur_repo/PKGBUILD" <<EOF
-          pkgname=${PRODUCT}-bin
-          pkgver=${VERSION}
-          pkgrel=1
-          pkgdesc="Prebuilt ${PRODUCT} release binary from komawm"
-          arch=('x86_64')
-          url="https://komawm.org"
-          license=('GPL-3.0-or-later')
-          provides=('${PRODUCT}')
-          conflicts=('${PRODUCT}')
-          source=("${CDN_ORIGIN}/releases/${PRODUCT}/${TAG}/${pkg_base}")
-          sha256sums=('${pkg_sha}')
-          package() {
-            bsdtar -xf "${pkg_base}" -C "\$pkgdir" --exclude='.PKGINFO' --exclude='.BUILDINFO' --exclude='.MTREE'
-          }
-          EOF
-              git -C "$aur_repo" config user.name "komawm release bot"
-              git -C "$aur_repo" config user.email "noreply@komawm.org"
-              git -C "$aur_repo" add PKGBUILD
-              git -C "$aur_repo" diff --cached --quiet || {
-                git -C "$aur_repo" commit -m "chore(${PRODUCT}-bin): release ${VERSION}"
-                git -C "$aur_repo" push origin master
-              }
-            fi
+            git clone "ssh://aur@aur.archlinux.org/${PRODUCT}-bin.git" "$aur_repo"
+            git -C "$aur_repo" checkout -B master
+            python3 scripts/render_aur_bin.py \
+              --product "$PRODUCT" \
+              --version "$VERSION" \
+              --tag "$TAG" \
+              --sha256-x86_64 "$zst_x86_64" \
+              --sha256-aarch64 "$zst_aarch64" \
+              --cdn-origin "$CDN_ORIGIN" \
+              --out-dir "$aur_repo"
+            git -C "$aur_repo" config user.name "komawm release bot"
+            git -C "$aur_repo" config user.email "noreply@komawm.org"
+            git -C "$aur_repo" add PKGBUILD .SRCINFO
+            git -C "$aur_repo" diff --cached --quiet || {
+              git -C "$aur_repo" commit -m "chore(${PRODUCT}-bin): release ${VERSION}"
+              git -C "$aur_repo" push -u origin master
+            }
             rm -rf "$ssh_dir" "$aur_repo"
           fi
 
-          # 2. Fedora Copr webhook/CLI build trigger
-          if [[ -n "${COPR_CONFIG:-}" ]]; then
+          # 2. Fedora Copr webhook/CLI build trigger (stable releases)
+          if [[ "$CHANNEL" == "stable" && -n "${COPR_CONFIG:-}" ]]; then
             sudo apt-get update
-            sudo apt-get install --no-install-recommends -y python3-pip copr-cli || true
+            sudo apt-get install --no-install-recommends -y copr-cli || true
             if command -v copr-cli >/dev/null 2>&1; then
               install -d -m 0700 "$HOME/.config"
               printf '%s\n' "$COPR_CONFIG" > "$HOME/.config/copr"

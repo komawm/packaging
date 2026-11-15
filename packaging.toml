@@ -25,6 +25,8 @@ source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 template = "archlinux/PKGBUILD.in"
 jiku_template = "archlinux/PKGBUILD.jiku.in"
+koma_bin_template = "archlinux/PKGBUILD.koma-bin.in"
+jiku_bin_template = "archlinux/PKGBUILD.jiku-bin.in"
 architectures = ["x86_64", "aarch64"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
 jiku_packaged_binaries = ["jikud", "jiku"]
@@ -104,6 +106,8 @@ source_repository = "https://github.com/komawm/koma"
 source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 template = "homebrew/koma.rb.in"
+koma_bin_template = "homebrew/koma-bin.rb.in"
+jiku_bin_template = "homebrew/jiku-bin.rb.in"
 architectures = ["x86_64", "aarch64"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
 

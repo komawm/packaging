@@ -1,0 +1,35 @@
+# Prebuilt Linuxbrew formula template for Jiku.
+class Jiku < Formula
+  desc "Desktop orchestration daemon, CLI/MCP controller, and SQLite FTS5 memory companion for Koma"
+  homepage "https://komawm.org/jiku/"
+  version "@VERSION@"
+  license "GPL-3.0-or-later"
+
+  depends_on :linux
+
+  on_linux do
+    on_intel do
+      url "@CDN_ORIGIN@/releases/jiku/@TAG@/jiku-@VERSION@-x86_64-unknown-linux-gnu.tar.gz"
+      sha256 "@SHA256_X86_64@"
+    end
+
+    on_arm do
+      url "@CDN_ORIGIN@/releases/jiku/@TAG@/jiku-@VERSION@-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "@SHA256_AARCH64@"
+    end
+  end
+
+  def install
+    bin.install "bin/jikud"
+    bin.install "bin/jiku"
+    (lib/"systemd/user").install "resources/jikud.service"
+    (doc/"examples").install "examples/config.toml", "examples/init.lua"
+    (doc/"skills").install "skills/SKILL.md"
+    (share/"licenses/jiku").install "LICENSE"
+  end
+
+  test do
+    assert_match "jiku", shell_output("#{bin}/jiku --version")
+    system "#{bin}/jikud", "--headless-check"
+  end
+end

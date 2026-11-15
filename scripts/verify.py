@@ -42,6 +42,7 @@ def main() -> None:
     config = tomllib.loads((root / "packaging.toml").read_text(encoding="utf-8"))
     verify_top_level_policy(root, config)
     verify_all_distro_templates(root, config)
+    verify_prebuilt_templates(root, config)
     verify_nfpm_specs(root, config)
     verify_dependabot(root)
     if config["publish_enabled"] is True:
@@ -357,6 +358,112 @@ def verify_all_distro_templates(root: Path, config: dict) -> None:
             "render_arch.py --product jiku",
         )
         run_checked(["bash", "-n", str(jiku_out)], "Arch rendered Jiku PKGBUILD syntax check")
+
+
+def verify_prebuilt_templates(root: Path, config: dict) -> None:
+    """Validate prebuilt binary AUR (koma-bin/jiku-bin) and Linuxbrew templates, renderers, and .SRCINFO."""
+    bin_placeholders = {"@VERSION@", "@TAG@", "@CDN_ORIGIN@", "@SHA256_X86_64@", "@SHA256_AARCH64@"}
+    specs = (
+        ("koma", "archlinux", "koma_bin_template", "/usr/share/licenses/koma/LICENSE", "https://komawm.org", "Koma"),
+        ("jiku", "archlinux", "jiku_bin_template", "/usr/share/licenses/jiku/LICENSE", "https://komawm.org/jiku/", "Jiku"),
+        ("koma", "homebrew", "koma_bin_template", '(share/"licenses/koma").install "LICENSE"', "https://komawm.org", "Koma"),
+        ("jiku", "homebrew", "jiku_bin_template", '(share/"licenses/jiku").install "LICENSE"', "https://komawm.org/jiku/", "Jiku"),
+    )
+    for product, section, key, license_needle, _url, _cls in specs:
+        rel = config[section].get(key)
+        if not isinstance(rel, str):
+            raise SystemExit(f"[{section}] must declare {key}")
+        tpl_path = root / rel
+        if not tpl_path.is_file():
+            raise SystemExit(f"Missing prebuilt template: {rel}")
+        text = tpl_path.read_text(encoding="utf-8")
+        if "SKIP" in text:
+            raise SystemExit(f"Prebuilt template must not use SKIP checksums: {rel}")
+        found = set(re.findall(r"@[A-Z0-9_]+@", text))
+        if found != bin_placeholders:
+            raise SystemExit(f"Prebuilt template {rel} must bind {sorted(bin_placeholders)}, found {sorted(found)}")
+        if "GPL-3.0-or-later" not in text or license_needle not in text:
+            raise SystemExit(f"Prebuilt template {rel} must preserve GPL-3.0-or-later and install LICENSE")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        for product, formula_class in (("koma", "Koma"), ("jiku", "Jiku")):
+            aur_dir = tmp_dir / f"aur-{product}"
+            run_checked(
+                [
+                    sys.executable,
+                    str(root / "scripts/render_aur_bin.py"),
+                    "--product",
+                    product,
+                    "--version",
+                    "0.0.1",
+                    "--tag",
+                    "v0.0.1",
+                    "--sha256-x86_64",
+                    DUMMY_SHA256,
+                    "--sha256-aarch64",
+                    DUMMY_SHA256,
+                    "--out-dir",
+                    str(aur_dir),
+                ],
+                f"render_aur_bin.py --product {product}",
+            )
+            pkgbuild_path = aur_dir / "PKGBUILD"
+            srcinfo_path = aur_dir / ".SRCINFO"
+            for rendered_file in (pkgbuild_path, srcinfo_path):
+                rendered_text = rendered_file.read_text(encoding="utf-8")
+                if re.search(r"@[A-Z0-9_]+@", rendered_text):
+                    raise SystemExit(f"Unexpanded placeholder in {rendered_file.name} for {product}-bin")
+            run_checked(["bash", "-n", str(pkgbuild_path)], f"Arch {product}-bin PKGBUILD syntax check")
+            if shutil.which("makepkg"):
+                proc = subprocess.run(
+                    ["makepkg", "--printsrcinfo"],
+                    cwd=aur_dir,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                expected_lines = [
+                    line.rstrip() for line in proc.stdout.splitlines() if line.strip() and not line.lstrip().startswith("#")
+                ]
+                actual_lines = [
+                    line.rstrip()
+                    for line in srcinfo_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip() and not line.lstrip().startswith("#")
+                ]
+                if actual_lines != expected_lines:
+                    raise SystemExit(
+                        f"Generated .SRCINFO for {product}-bin does not match makepkg --printsrcinfo:\n"
+                        f"Expected: {expected_lines}\nActual:   {actual_lines}"
+                    )
+
+            rb_path = tmp_dir / f"{product}.rb"
+            run_checked(
+                [
+                    sys.executable,
+                    str(root / "scripts/render_homebrew_bin.py"),
+                    "--product",
+                    product,
+                    "--version",
+                    "0.0.1",
+                    "--tag",
+                    "v0.0.1",
+                    "--sha256-x86_64",
+                    DUMMY_SHA256,
+                    "--sha256-aarch64",
+                    DUMMY_SHA256,
+                    "--output",
+                    str(rb_path),
+                ],
+                f"render_homebrew_bin.py --product {product}",
+            )
+            rb_text = rb_path.read_text(encoding="utf-8")
+            if re.search(r"@[A-Z0-9_]+@", rb_text):
+                raise SystemExit(f"Unexpanded placeholder in {rb_path.name}")
+            if f"class {formula_class} < Formula" not in rb_text or "depends_on :linux" not in rb_text:
+                raise SystemExit(f"Linuxbrew formula {rb_path.name} missing expected class or depends_on :linux")
+            if shutil.which("ruby"):
+                run_checked(["ruby", "-c", str(rb_path)], f"Linuxbrew {product}.rb syntax check")
 
 
 def verify_nfpm_specs(root: Path, config: dict) -> None:

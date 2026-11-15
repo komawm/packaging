@@ -1,0 +1,51 @@
+# Prebuilt Linuxbrew formula template for Koma.
+class Koma < Formula
+  desc "Wayland tiling compositor with explicit desktop automation interfaces"
+  homepage "https://komawm.org"
+  version "@VERSION@"
+  license "GPL-3.0-or-later"
+
+  depends_on :linux
+
+  on_linux do
+    on_intel do
+      url "@CDN_ORIGIN@/releases/koma/@TAG@/koma-@VERSION@-x86_64-unknown-linux-gnu.tar.gz"
+      sha256 "@SHA256_X86_64@"
+    end
+
+    on_arm do
+      url "@CDN_ORIGIN@/releases/koma/@TAG@/koma-@VERSION@-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "@SHA256_AARCH64@"
+    end
+
+    depends_on "dbus"
+    depends_on "fontconfig"
+    depends_on "libdrm"
+    depends_on "libinput"
+    depends_on "libxkbcommon"
+    depends_on "mesa"
+    depends_on "seatd"
+    depends_on "systemd"
+    depends_on "wayland"
+  end
+
+  def install
+    bin.install "bin/koma"
+    bin.install "bin/komactl"
+    bin.install "bin/koma-mcp"
+    bin.install "bin/koma-overview"
+    bin.install "resources/koma-session"
+    (share/"wayland-sessions").install "resources/koma.desktop"
+    (lib/"systemd/user").install "resources/koma.service"
+    (lib/"systemd/user").install "resources/koma-shutdown.target"
+    (share/"xdg-desktop-portal").install "resources/koma-portals.conf"
+    (doc/"examples").install "resources/greetd-config.toml", "examples/init.lua"
+    (share/"licenses/koma").install "LICENSE"
+  end
+
+  test do
+    assert_match "koma", shell_output("#{bin}/koma --version")
+    assert_match "komactl", shell_output("#{bin}/komactl --version")
+    assert_match "name", shell_output("#{bin}/koma-mcp --print-tools")
+  end
+end

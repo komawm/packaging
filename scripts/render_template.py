@@ -13,6 +13,8 @@ import re
 COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 VERSION_RE = re.compile(r"0\.\d+\.\d+(?:-[a-z0-9.]+)?")
+STRICT_SEMVER_RE = re.compile(r"\d+\.\d+\.\d+")
+TAG_RE = re.compile(r"v\d+\.\d+\.\d+")
 
 
 @dataclass(frozen=True)
@@ -138,6 +140,78 @@ def _write_exclusive(target: Path, content: str, mode: int) -> None:
     with target.open("x", encoding="utf-8") as handle:
         handle.write(content)
     os.chmod(target, mode)
+
+
+def add_bin_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register shared CLI arguments for prebuilt binary AUR and Homebrew renderers."""
+    parser.add_argument("--product", required=True, choices=("koma", "jiku"))
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--tag", required=True)
+    parser.add_argument("--sha256-x86_64", required=True, dest="sha256_x86_64")
+    parser.add_argument("--sha256-aarch64", required=True, dest="sha256_aarch64")
+    parser.add_argument("--cdn-origin", default="https://cdn.komawm.org")
+
+
+def validate_bin_inputs(
+    version: str,
+    tag: str,
+    sha256_x86_64: str,
+    sha256_aarch64: str,
+    cdn_origin: str,
+    destination: Path,
+) -> tuple[str, Path]:
+    """Validate prebuilt binary artifact metadata and symlink-safe output paths."""
+    if not STRICT_SEMVER_RE.fullmatch(version):
+        raise ValueError("--version must be X.Y.Z without a hyphen")
+    if not TAG_RE.fullmatch(tag):
+        raise ValueError("--tag must be vX.Y.Z")
+    if tag.removeprefix("v") != version:
+        raise ValueError(f"--tag ({tag}) must match --version ({version})")
+    if not SHA256_RE.fullmatch(sha256_x86_64):
+        raise ValueError("--sha256-x86_64 must be a lowercase 64-character SHA-256")
+    if not SHA256_RE.fullmatch(sha256_aarch64):
+        raise ValueError("--sha256-aarch64 must be a lowercase 64-character SHA-256")
+    normalized_cdn = cdn_origin.rstrip("/")
+    if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::\d+)?(?:/[^\s]*)?", normalized_cdn):
+        raise ValueError("--cdn-origin must be an HTTPS URL without whitespace")
+    abs_dest = destination.absolute()
+    if any(path.is_symlink() for path in (abs_dest, *abs_dest.parents)):
+        raise ValueError("destination and its parent directories must not be symlinks")
+    return normalized_cdn, abs_dest
+
+
+def render_bin_template(
+    template_path: Path,
+    version: str,
+    tag: str,
+    cdn_origin: str,
+    sha256_x86_64: str,
+    sha256_aarch64: str,
+) -> str:
+    """Substitute prebuilt binary template placeholders and ensure none remain."""
+    rendered = (
+        template_path.read_text(encoding="utf-8")
+        .replace("@VERSION@", version)
+        .replace("@TAG@", tag)
+        .replace("@CDN_ORIGIN@", cdn_origin)
+        .replace("@SHA256_X86_64@", sha256_x86_64)
+        .replace("@SHA256_AARCH64@", sha256_aarch64)
+    )
+    leftover = sorted(set(re.findall(r"@[A-Z0-9_]+@", rendered)))
+    if leftover:
+        raise ValueError(f"Unexpanded placeholders in {template_path.name}: {leftover}")
+    return rendered
+
+
+def write_safe(target: Path, content: str, mode: int, *, overwrite: bool = False) -> None:
+    """Write a rendered packaging file with symlink checks and explicit permissions."""
+    if any(path.is_symlink() for path in (target, *target.parents)):
+        raise ValueError(f"Refusing to write through symlink: {target}")
+    if overwrite:
+        target.write_text(content, encoding="utf-8")
+        os.chmod(target, mode)
+    else:
+        _write_exclusive(target, content, mode)
 
 
 def render_distro(
