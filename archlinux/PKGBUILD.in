@@ -12,7 +12,7 @@ depends=('gcc-libs' 'glibc' 'libdrm' 'libinput' 'libxkbcommon' 'mesa' 'seatd' 's
 makedepends=('rustup' 'pkgconf' 'dbus' 'fontconfig')
 optdepends=('xwayland-satellite: X11 client support' 'xdg-desktop-portal-gnome: screencast and file portals' 'polkit: VT switching under systemd-logind without seatd' 'jiku: optional desktop orchestration companion daemon')
 # Release profile emits no debug info; avoid an empty koma-debug split package.
-options=('!debug')
+options=('!debug' '!lto')
 _source_commit='@SOURCE_COMMIT@'
 source=("koma-${_source_commit}.tar.gz::https://github.com/komawm/koma/archive/${_source_commit}.tar.gz")
 sha256sums=('@SOURCE_SHA256@')
