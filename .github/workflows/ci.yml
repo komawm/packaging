@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Metadata, nFPM, shellcheck and actionlint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y shellcheck
+
+      - name: Validate packaging metadata, templates and workflows
+        run: python3 scripts/verify.py
+
+      - name: Dry-run Arch PKGBUILD renderer for koma and jiku
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          dummy_commit="0123456789abcdef0123456789abcdef01234567"
+          dummy_sha="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          for prod in koma jiku; do
+            python3 scripts/render_arch.py \
+              --product "$prod" \
+              --source-commit "$dummy_commit" \
+              --source-sha256 "$dummy_sha" \
+              --version "0.0.1" \
+              --output "$tmpdir/PKGBUILD.$prod"
+            bash -n "$tmpdir/PKGBUILD.$prod"
+          done
+
+      - name: Run ShellCheck on templates and scripts
+        run: |
+          shellcheck -s bash -e SC2034,SC2154 archlinux/PKGBUILD.in archlinux/PKGBUILD.jiku.in
+          shellcheck -s sh -e SC2034,SC2154 alpine/APKBUILD.in
+          shellcheck -s sh scripts/ci-alpine-in-container.sh
+          shellcheck -s bash scripts/ci-rpm-in-container.sh scripts/download-source.sh scripts/resolve-tag.sh apt/setup.sh
+          if compgen -G "vm/*.sh" > /dev/null; then
+            shellcheck -s bash vm/*.sh
+          fi
+
+      - name: Lint GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: -color

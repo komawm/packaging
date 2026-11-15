@@ -1,8 +1,8 @@
 name: cd-archlinux
 
 # Manually dispatched development-prerelease CD for Arch Linux packages.
-# Building never publishes. Publishing requires publish=true, the protected
-# `release` environment, and the PRODUCT_RELEASE_TOKEN environment secret.
+# Supports both `koma` and `jiku`. Building never publishes. Publishing requires
+# publish=true, the protected `release` environment, and PRODUCT_RELEASE_TOKEN.
 
 on:
   workflow_dispatch:
@@ -12,6 +12,7 @@ on:
         type: choice
         options:
           - koma
+          - jiku
         required: true
         default: koma
       tag:
@@ -63,11 +64,11 @@ jobs:
         run: |
           set -euo pipefail
           case "$PRODUCT" in
-            koma) ;;
+            koma|jiku) ;;
             *) echo "::error::Unsupported product: $PRODUCT"; exit 1 ;;
           esac
-          if [[ ! "$TAG" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Tag must match v0.MINOR.PATCH for development builds"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag must match vMAJOR.MINOR.PATCH"
             exit 1
           fi
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
@@ -78,7 +79,6 @@ jobs:
           ref_json="$(gh api "repos/komawm/${PRODUCT}/git/ref/tags/${TAG}")"
           obj_type="$(jq -r '.object.type' <<<"$ref_json")"
           obj_sha="$(jq -r '.object.sha' <<<"$ref_json")"
-          # Dereference annotated (possibly nested) tag objects.
           depth=0
           while [[ "$obj_type" == "tag" ]]; do
             depth=$((depth + 1))
@@ -114,6 +114,7 @@ jobs:
           set -euo pipefail
           python3 scripts/verify.py
           python3 scripts/render_arch.py \
+            --product "$PRODUCT" \
             --source-commit "$SOURCE_COMMIT" \
             --source-sha256 "$SOURCE_SHA256" \
             --version "$VERSION" \
@@ -189,7 +190,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: archlinux-package
+          name: archlinux-package-${{ inputs.product }}
           path: /tmp/cd-out/
           if-no-files-found: error
           retention-days: 14
@@ -213,14 +214,13 @@ jobs:
           set -euo pipefail
           if [[ -z "${GH_TOKEN:-}" ]]; then
             echo "::error::PRODUCT_RELEASE_TOKEN is not set in the 'release' environment of this repository."
-            echo "::error::Create a fine-grained token or GitHub App with Contents: write on komawm/${PRODUCT} and add it as an environment secret."
             exit 1
           fi
 
       - name: Download build artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: archlinux-package
+          name: archlinux-package-${{ inputs.product }}
           path: dist
 
       - name: Verify artifact integrity and identity
@@ -276,7 +276,6 @@ jobs:
         working-directory: dist
         run: |
           set -euo pipefail
-          # Distribution-suffixed names avoid clobbering the product's own SHA256SUMS/manifest.
           cp PACKAGE-MANIFEST.toml PACKAGE-MANIFEST-archlinux.toml
           gh release upload "$TAG" \
             "$PKG_FILE" SHA256SUMS-archlinux PACKAGE-MANIFEST-archlinux.toml \

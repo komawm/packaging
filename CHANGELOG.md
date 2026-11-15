@@ -8,6 +8,18 @@ versions follow the Koma `v0.0.x` development series until `v0.1.0` acceptance.
 
 ### Added
 
+- Unified R2 CDN & nFPM release pipeline (`.github/workflows/cd-release.yml`),
+  nFPM package specifications (`nfpm/koma.yaml`, `nfpm/jiku.yaml` for `.deb`,
+  `.rpm`, `.apk` across `amd64`/`arm64`), and signed deb822 APT repository
+  configuration (`apt/komawm.sources`, `apt/setup.sh`) publishing to
+  `https://cdn.komawm.org`.
+- Jiku packaging scaffolding: `archlinux/PKGBUILD.jiku.in`, `nfpm/jiku.yaml`,
+  `--product {koma,jiku}` support in `scripts/render_arch.py` and
+  `cd-archlinux.yml`, and `[jiku]` / `[cdn]` / `[nfpm]` metadata in
+  `packaging.toml`.
+- Repository CI workflow (`.github/workflows/ci.yml`) running `scripts/verify.py`,
+  `shellcheck`, and `actionlint` on `main` pushes and PRs, plus monthly grouped
+  `.github/dependabot.yml` updates for GitHub Actions.
 - Multi-architecture (`x86_64` and `aarch64`/`arm64`) support across packaging
   templates (`archlinux`, `debian`, `rpm`, `alpine`, `freebsd`, `nix`, `homebrew`),
   matrix legs on `ubuntu-24.04` + `ubuntu-24.04-arm` in
@@ -43,6 +55,12 @@ versions follow the Koma `v0.0.x` development series until `v0.1.0` acceptance.
 
 ### Fixed
 
+- Rewrote `scripts/verify.py` to validate YAML workflows, `nfpm/*.yaml`,
+  `apt/*`, and `.github/dependabot.yml` using the Python 3.11+ standard library
+  without requiring third-party `PyYAML`.
+- Hardened `vm/freebsd-vm.sh` package installation and fallback toolchain install
+  with `FETCH_TIMEOUT=30`, `FETCH_RETRY=3`, and bounded `pkg` retry loops for
+  transient network errors over QEMU user-mode networking.
 - Arch template installs `koma-portals.conf` to `/usr/share/xdg-desktop-portal/`
   (matching Koma's session installer) and `greetd-config.toml` as a documentation
   example; found by the `v0.0.1` VM run, not yet in a built package.

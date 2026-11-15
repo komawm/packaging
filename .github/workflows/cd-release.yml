@@ -1,0 +1,653 @@
+name: cd-release
+
+# Unified Linux distribution & Cloudflare R2 delivery workflow for Koma and Jiku.
+# Centralizes all release environment secrets inside `komawm/packaging`:
+#   - CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN (R2 bucket `komawm` -> https://cdn.komawm.org)
+#   - PRODUCT_RELEASE_TOKEN or GH_PAT (GitHub Releases upload on komawm/koma & komawm/jiku)
+#   - APT_GPG_PRIVATE_KEY (R2-hosted signed deb822 APT repository)
+#   - AUR_SSH_PRIVATE_KEY (AUR koma-bin / jiku-bin updates on stable channel)
+#   - COPR_CONFIG (Fedora / RHEL / openEuler Copr trigger on stable channel)
+#   - CACHIX_AUTH_TOKEN (Nix Cachix binary cache push when upstream repo carries flake.nix)
+#
+# All build jobs run without secrets. Publishing requires explicit boolean inputs
+# and approval of the protected `release` environment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: Product repository under komawm
+        type: choice
+        options:
+          - koma
+          - jiku
+        required: true
+        default: koma
+      tag:
+        description: Existing product git tag (e.g. v0.0.1 or v0.1.0)
+        type: string
+        required: true
+      channel:
+        description: Release track (stable updates latest.txt & distro repos; development uploads versioned artifacts only)
+        type: choice
+        options:
+          - development
+          - stable
+        required: true
+        default: development
+      publish:
+        description: Master gate authorizing publication to selected destinations via the release environment
+        type: boolean
+        required: false
+        default: false
+      publish_r2:
+        description: Upload release archives, nFPM packages & APT metadata to Cloudflare R2 (cdn.komawm.org)
+        type: boolean
+        required: false
+        default: true
+      publish_github:
+        description: Attach built Linux packages and checksums to komawm/<product> GitHub Release
+        type: boolean
+        required: false
+        default: true
+      publish_distros:
+        description: Sync AUR, Fedora Copr, and (if flake.nix exists in product repo) Nix Cachix
+        type: boolean
+        required: false
+        default: false
+      check_bsd:
+        description: Run experimental FreeBSD and OpenBSD cross-target portability checks (x86_64 & aarch64)
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-release-${{ inputs.product }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve immutable source commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      commit: ${{ steps.meta.outputs.commit }}
+      source_sha256: ${{ steps.meta.outputs.source_sha256 }}
+      rust_channel: ${{ steps.meta.outputs.rust_channel }}
+      has_flake: ${{ steps.meta.outputs.has_flake }}
+    env:
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      CHANNEL: ${{ inputs.channel }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate packaging metadata
+        run: python3 scripts/verify.py
+
+      - name: Dereference tag and inspect upstream product archive
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::Tag must match vMAJOR.MINOR.PATCH, got '$TAG'"
+            exit 1
+          fi
+          version="${TAG#v}"
+          if [[ "$CHANNEL" == "stable" && "$version" =~ ^0\.0\. ]]; then
+            echo "::error::0.0.x incubation tags cannot be published on the 'stable' channel"
+            exit 1
+          fi
+
+          ref_json="$(gh api "repos/komawm/${PRODUCT}/git/ref/tags/${TAG}")"
+          obj_type="$(jq -r '.object.type' <<<"$ref_json")"
+          obj_sha="$(jq -r '.object.sha' <<<"$ref_json")"
+          depth=0
+          while [[ "$obj_type" == "tag" ]]; do
+            depth=$((depth + 1))
+            if (( depth > 5 )); then
+              echo "::error::Tag nesting too deep"
+              exit 1
+            fi
+            tag_json="$(gh api "repos/komawm/${PRODUCT}/git/tags/${obj_sha}")"
+            obj_type="$(jq -r '.object.type' <<<"$tag_json")"
+            obj_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          done
+          if [[ "$obj_type" != "commit" || ! "$obj_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Tag $TAG did not resolve to a 40-char commit"
+            exit 1
+          fi
+
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          archive="$work/${PRODUCT}-${obj_sha}.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --output "$archive" \
+            "https://github.com/komawm/${PRODUCT}/archive/${obj_sha}.tar.gz"
+          source_sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
+          tar -xzf "$archive" -C "$work"
+          src_dir="$work/${PRODUCT}-${obj_sha}"
+
+          cargo_ver="$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["workspace"]["package"]["version"])' "$src_dir/Cargo.toml")"
+          if [[ "$cargo_ver" != "$version" ]]; then
+            echo "::error::Tag version $version does not match Cargo.toml workspace version $cargo_ver"
+            exit 1
+          fi
+          rust_channel="$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["toolchain"]["channel"])' "$src_dir/rust-toolchain.toml")"
+          has_flake="false"
+          if [[ -f "$src_dir/flake.nix" ]]; then
+            has_flake="true"
+          fi
+
+          {
+            echo "version=$version"
+            echo "commit=$obj_sha"
+            echo "source_sha256=$source_sha256"
+            echo "rust_channel=$rust_channel"
+            echo "has_flake=$has_flake"
+          } >> "$GITHUB_OUTPUT"
+
+  build-linux:
+    name: Build Linux packages (${{ matrix.nfpm_arch }})
+    needs: resolve
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x86_64 Linux: Desktop PCs, servers, and Intel MacBooks (Core i5/i7/i9) running Linux
+          - runner: ubuntu-24.04
+            rust_target: x86_64-unknown-linux-gnu
+            nfpm_arch: amd64
+            rpm_arch: x86_64
+            rustflags: ""
+          # ARM64 Linux: ARM workstations/SBCs AND Apple Silicon MacBooks (M1/M2/M3/M4 Asahi Linux 16 KiB pages)
+          - runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            nfpm_arch: arm64
+            rpm_arch: aarch64
+            rustflags: "-C link-arg=-Wl,-z,max-page-size=16384"
+    env:
+      PRODUCT: ${{ inputs.product }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.resolve.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.resolve.outputs.source_sha256 }}
+      RUST_TARGET: ${{ matrix.rust_target }}
+      NFPM_ARCH: ${{ matrix.nfpm_arch }}
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      NFPM_VERSION: "2.48.0"
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install native build dependencies and zstd
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          if [[ "$PRODUCT" == "koma" ]]; then
+            sudo apt-get install --no-install-recommends -y \
+              pkg-config zstd libudev-dev libinput-dev libseat-dev libgbm-dev \
+              libegl1-mesa-dev libgles2-mesa-dev libwayland-dev libxkbcommon-dev \
+              libdbus-1-dev libfontconfig1-dev libdisplay-info-dev
+          else
+            sudo apt-get install --no-install-recommends -y pkg-config zstd
+          fi
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ needs.resolve.outputs.rust_channel }}
+
+      - name: Cache Cargo registry and target build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: cd-${{ inputs.product }}-${{ matrix.rust_target }}-${{ needs.resolve.outputs.rust_channel }}
+
+      - name: Install verified nFPM packager binary
+        run: |
+          set -euo pipefail
+          nfpm_os_arch="Linux_x86_64"
+          if [[ "$NFPM_ARCH" == "arm64" ]]; then
+            nfpm_os_arch="Linux_arm64"
+          fi
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          base_url="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "$base_url/checksums.txt" -o "$tmp/checksums.txt"
+          tarball="nfpm_${NFPM_VERSION}_${nfpm_os_arch}.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "$base_url/$tarball" -o "$tmp/$tarball"
+          (cd "$tmp" && grep "  ${tarball}$" checksums.txt | sha256sum --check --strict)
+          sudo tar -xzf "$tmp/$tarball" -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Fetch verified upstream source, compile, smoke-check and package
+        env:
+          OUT_DIR: ${{ runner.temp }}/out-${{ matrix.nfpm_arch }}
+          STAGE_DIR: ${{ runner.temp }}/stage
+        run: |
+          set -euo pipefail
+          install -d "$OUT_DIR" "$STAGE_DIR"
+          src_tar="$STAGE_DIR/${PRODUCT}-${SOURCE_COMMIT}.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/komawm/${PRODUCT}/archive/${SOURCE_COMMIT}.tar.gz" \
+            -o "$src_tar"
+          echo "${SOURCE_SHA256}  ${src_tar}" | sha256sum --check --strict
+          tar -xzf "$src_tar" -C "$STAGE_DIR"
+          src_root="$STAGE_DIR/${PRODUCT}-${SOURCE_COMMIT}"
+
+          pushd "$src_root" >/dev/null
+          if [[ "$PRODUCT" == "koma" ]]; then
+            cargo build --release --locked \
+              -p koma -p komactl -p koma-mcp -p koma-overview
+            ./target/release/koma --headless-check
+            ./target/release/komactl validate examples/init.lua
+            bins=(koma komactl koma-mcp koma-overview)
+          else
+            cargo build --release --locked -p jikud -p jiku
+            ./target/release/jikud --headless-check
+            ./target/release/jikud --validate-config --config examples/config.toml --policy examples/init.lua
+            bins=(jikud jiku)
+          fi
+          popd >/dev/null
+
+          # Stage portable .tar.zst bundle
+          bundle_name="${PRODUCT}-${VERSION}-${RUST_TARGET}"
+          bundle_dir="$STAGE_DIR/$bundle_name"
+          install -d "$bundle_dir/bin"
+          for b in "${bins[@]}"; do
+            install -m 0755 "$src_root/target/release/$b" "$bundle_dir/bin/$b"
+          done
+          cp -R "$src_root/resources" "$bundle_dir/resources"
+          cp -R "$src_root/examples" "$bundle_dir/examples"
+          if [[ -d "$src_root/skills" ]]; then
+            cp -R "$src_root/skills" "$bundle_dir/skills"
+          fi
+          install -m 0644 "$src_root/LICENSE" "$bundle_dir/LICENSE"
+          install -m 0644 "$src_root/README.md" "$bundle_dir/README.md"
+          install -m 0644 "$src_root/CHANGELOG.md" "$bundle_dir/CHANGELOG.md"
+
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+            -C "$STAGE_DIR" -cf - "$bundle_name" \
+            | zstd -19 -T0 -o "$OUT_DIR/${bundle_name}.tar.zst"
+
+          # Stage nFPM root and build .deb, .rpm, and .apk
+          export PKG_VERSION="$VERSION"
+          export PKG_ARCH="$NFPM_ARCH"
+          export PKG_SRC_ROOT="$src_root"
+          for fmt in deb rpm apk; do
+            nfpm package \
+              --config "nfpm/${PRODUCT}.yaml" \
+              --packager "$fmt" \
+              --target "$OUT_DIR/"
+          done
+
+          (cd "$OUT_DIR" && sha256sum ./* > "SHA256SUMS-${NFPM_ARCH}")
+          ls -lh "$OUT_DIR"
+
+      - name: Upload Linux packages artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-packages-${{ inputs.product }}-${{ matrix.nfpm_arch }}
+          path: ${{ runner.temp }}/out-${{ matrix.nfpm_arch }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  build-archlinux:
+    name: Build Arch Linux package (x86_64)
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container:
+      image: archlinux:base-devel@sha256:fa2d4ce3310ddd90a4208e5168be8ad367da5129af1245f38fd2d803bcbe3239
+    env:
+      PRODUCT: ${{ inputs.product }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.resolve.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.resolve.outputs.source_sha256 }}
+      OUT_DIR: /tmp/arch-out
+      BUILD_DIR: /tmp/arch-build
+    steps:
+      - name: Install Arch build tooling
+        run: pacman -Syu --noconfirm --needed git python
+
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Render PKGBUILD and run makepkg as unprivileged user
+        run: |
+          set -euo pipefail
+          install -d "$BUILD_DIR" "$OUT_DIR"
+          python3 scripts/render_arch.py \
+            --product "$PRODUCT" \
+            --source-commit "$SOURCE_COMMIT" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --version "$VERSION" \
+            --output "$BUILD_DIR/PKGBUILD"
+          useradd --create-home --shell /bin/bash builder
+          printf '%s\n' 'builder ALL=(root) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/builder
+          chmod 0440 /etc/sudoers.d/builder
+          chown -R builder:builder "$BUILD_DIR"
+          cd "$BUILD_DIR"
+          sudo -u builder -- makepkg --syncdeps --noconfirm --cleanbuild
+          mapfile -t pkgs < <(sudo -u builder -- makepkg --packagelist)
+          cp "${pkgs[0]}" "$OUT_DIR/"
+          (cd "$OUT_DIR" && sha256sum ./*.pkg.tar.zst > SHA256SUMS-arch)
+
+      - name: Upload Arch package artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-packages-${{ inputs.product }}-arch
+          path: /tmp/arch-out/
+          if-no-files-found: error
+          retention-days: 14
+
+  check-bsd-portability:
+    name: BSD portability check (${{ matrix.bsd_target }})
+    if: ${{ inputs.check_bsd }}
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        bsd_target:
+          - x86_64-unknown-freebsd
+          - aarch64-unknown-freebsd
+          - x86_64-unknown-openbsd
+    env:
+      PRODUCT: ${{ inputs.product }}
+      SOURCE_COMMIT: ${{ needs.resolve.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.resolve.outputs.source_sha256 }}
+      BSD_TARGET: ${{ matrix.bsd_target }}
+    steps:
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ needs.resolve.outputs.rust_channel }}
+
+      - name: Check core protocol, model, Lua & CLI portability on FreeBSD/OpenBSD targets
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/komawm/${PRODUCT}/archive/${SOURCE_COMMIT}.tar.gz" \
+            -o "$work/src.tar.gz"
+          echo "${SOURCE_SHA256}  $work/src.tar.gz" | sha256sum --check --strict
+          tar -xzf "$work/src.tar.gz" -C "$work"
+          cd "$work/${PRODUCT}-${SOURCE_COMMIT}"
+          if rustup target add "$BSD_TARGET" 2>/dev/null; then
+            if [[ "$PRODUCT" == "koma" ]]; then
+              cargo check --locked --target "$BSD_TARGET" -p koma-proto -p koma-model -p koma-lua -p koma-seat
+            else
+              cargo check --locked --target "$BSD_TARGET" -p jiku
+            fi
+          else
+            echo "::notice::Tier-3 target $BSD_TARGET requires cargo -Zbuild-std on nightly; skipping std prebuilt check"
+          fi
+
+  publish:
+    name: Publish to Cloudflare R2, GitHub Releases and Linux channels
+    if: ${{ inputs.publish && (inputs.publish_r2 || inputs.publish_github || inputs.publish_distros) }}
+    needs: [resolve, build-linux, build-archlinux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+    env:
+      PRODUCT: ${{ inputs.product }}
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.resolve.outputs.commit }}
+      HAS_FLAKE: ${{ needs.resolve.outputs.has_flake }}
+      CHANNEL: ${{ inputs.channel }}
+      PUBLISH_R2: ${{ inputs.publish_r2 }}
+      PUBLISH_GITHUB: ${{ inputs.publish_github }}
+      PUBLISH_DISTROS: ${{ inputs.publish_distros }}
+      R2_BUCKET: komawm
+      CDN_ORIGIN: https://cdn.komawm.org
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      PRODUCT_RELEASE_TOKEN: ${{ secrets.PRODUCT_RELEASE_TOKEN }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun for Wrangler R2 uploads
+        if: ${{ inputs.publish_r2 }}
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Download all built package artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: linux-packages-${{ inputs.product }}-*
+          path: incoming
+          merge-multiple: true
+
+      - name: Verify artifact checksums and assemble unified SHA256SUMS
+        run: |
+          set -euo pipefail
+          install -d release-bundle
+          pushd incoming >/dev/null
+          for sumfile in SHA256SUMS-*; do
+            sha256sum --check --strict "$sumfile"
+          done
+          shopt -s nullglob
+          for asset in ./*.tar.zst ./*.deb ./*.rpm ./*.apk ./*.pkg.tar.zst; do
+            cp "$asset" ../release-bundle/
+          done
+          popd >/dev/null
+          (cd release-bundle && sha256sum ./* | sort -k2 > SHA256SUMS)
+          cat release-bundle/SHA256SUMS
+
+      - name: Upload immutable release bundle and signed APT index to Cloudflare R2
+        if: ${{ inputs.publish_r2 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" || -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are required in the 'release' environment"
+            exit 1
+          fi
+          bun add --no-save wrangler@4.136.0
+          r2_put() {
+            local key="$1" file="$2" ctype="$3" cache="$4"
+            WRANGLER_SEND_METRICS=false ./node_modules/.bin/wrangler r2 object put "${R2_BUCKET}/${key}" \
+              --file "$file" \
+              --content-type "$ctype" \
+              --cache-control "$cache" \
+              --remote
+          }
+
+          # 1. Upload versioned artifacts under releases/<product>/<tag>/
+          for f in release-bundle/*; do
+            base="$(basename "$f")"
+            ctype="application/octet-stream"
+            if [[ "$base" == "SHA256SUMS" ]]; then
+              ctype="text/plain; charset=utf-8"
+            fi
+            r2_put "releases/${PRODUCT}/${TAG}/${base}" "$f" "$ctype" "public, max-age=31536000, immutable"
+          done
+
+          # 2. Update install pointer only on stable releases (or latest-dev.txt on development)
+          ptr_file="$(mktemp)"
+          printf '%s\n' "$TAG" > "$ptr_file"
+          if [[ "$CHANNEL" == "stable" ]]; then
+            r2_put "install/${PRODUCT}/latest.txt" "$ptr_file" "text/plain; charset=utf-8" "public, max-age=300"
+          else
+            r2_put "install/${PRODUCT}/latest-dev.txt" "$ptr_file" "text/plain; charset=utf-8" "public, max-age=300"
+          fi
+          rm -f "$ptr_file"
+
+          # 3. Refresh GPG-signed deb822 APT repository on R2 when APT_GPG_PRIVATE_KEY is present and channel is stable
+          if [[ "$CHANNEL" == "stable" && -n "${APT_GPG_PRIVATE_KEY:-}" ]]; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y dpkg-dev apt-utils gnupg
+            gnupg_home="$(mktemp -d)"
+            chmod 0700 "$gnupg_home"
+            export GNUPGHOME="$gnupg_home"
+            printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+            apt_root="$(mktemp -d)"
+            install -d "$apt_root/pool/main" "$apt_root/dists/stable/main/binary-amd64" "$apt_root/dists/stable/main/binary-arm64"
+
+            # Preserve existing other-product .deb files already in R2 pool if present
+            for other in koma jiku; do
+              if [[ "$other" != "$PRODUCT" ]]; then
+                other_tag="$(curl -fsSL "${CDN_ORIGIN}/install/${other}/latest.txt" 2>/dev/null || true)"
+                if [[ -n "$other_tag" ]]; then
+                  other_sums="$(curl -fsSL "${CDN_ORIGIN}/releases/${other}/${other_tag}/SHA256SUMS" 2>/dev/null || true)"
+                  for a in amd64 arm64; do
+                    deb_name="$(printf '%s\n' "$other_sums" | sed -n "s|^[0-9a-f]\\{64\\}  \\./\\(${other}_[^ ]*_${a}\\.deb\\)\$|\\1|p; s|^[0-9a-f]\\{64\\}  \\(${other}_[^ ]*_${a}\\.deb\\)\$|\\1|p" | head -n1)"
+                    if [[ -z "$deb_name" ]]; then
+                      deb_name="${other}_${other_tag#v}-1_${a}.deb"
+                    fi
+                    curl -fsSL "${CDN_ORIGIN}/apt/pool/main/${deb_name}" \
+                      -o "$apt_root/pool/main/${deb_name}" 2>/dev/null || true
+                  done
+                fi
+              fi
+            done
+            cp release-bundle/*.deb "$apt_root/pool/main/"
+
+            pushd "$apt_root" >/dev/null
+            for a in amd64 arm64; do
+              dpkg-scanpackages --arch "$a" pool/main /dev/null > "dists/stable/main/binary-${a}/Packages"
+              gzip -9cn "dists/stable/main/binary-${a}/Packages" > "dists/stable/main/binary-${a}/Packages.gz"
+            done
+            apt-ftparchive \
+              -o APT::FTPArchive::Release::Origin="komawm" \
+              -o APT::FTPArchive::Release::Label="komawm" \
+              -o APT::FTPArchive::Release::Suite="stable" \
+              -o APT::FTPArchive::Release::Codename="stable" \
+              -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
+              -o APT::FTPArchive::Release::Components="main" \
+              release dists/stable > dists/stable/Release
+            gpg --batch --yes --armor --detach-sign -o dists/stable/Release.gpg dists/stable/Release
+            gpg --batch --yes --clearsign -o dists/stable/InRelease dists/stable/Release
+            gpg --batch --yes --export > komawm-archive-keyring.gpg
+            popd >/dev/null
+
+            r2_put "apt/komawm-archive-keyring.gpg" "$apt_root/komawm-archive-keyring.gpg" "application/pgp-keys" "public, max-age=3600"
+            r2_put "apt/komawm.sources" "apt/komawm.sources" "text/plain; charset=utf-8" "public, max-age=3600"
+            r2_put "apt/setup.sh" "apt/setup.sh" "text/x-shellscript; charset=utf-8" "public, max-age=3600"
+            for deb in "$apt_root"/pool/main/*.deb; do
+              r2_put "apt/pool/main/$(basename "$deb")" "$deb" "application/vnd.debian.binary-package" "public, max-age=31536000, immutable"
+            done
+            for idx in Release Release.gpg InRelease main/binary-amd64/Packages main/binary-amd64/Packages.gz main/binary-arm64/Packages main/binary-arm64/Packages.gz; do
+              r2_put "apt/dists/stable/${idx}" "$apt_root/dists/stable/${idx}" "application/octet-stream" "public, max-age=300"
+            done
+            rm -rf "$gnupg_home" "$apt_root"
+          fi
+
+      - name: Upload assets to GitHub Release on komawm/<product>
+        if: ${{ inputs.publish_github }}
+        run: |
+          set -euo pipefail
+          token="${PRODUCT_RELEASE_TOKEN:-${GH_PAT:-}}"
+          if [[ -z "$token" ]]; then
+            echo "::error::Either PRODUCT_RELEASE_TOKEN or GH_PAT must be set in the 'release' environment"
+            exit 1
+          fi
+          export GH_TOKEN="$token"
+          cp release-bundle/SHA256SUMS "release-bundle/SHA256SUMS-linux-packages"
+          gh release upload "$TAG" \
+            release-bundle/*.tar.zst \
+            release-bundle/*.deb \
+            release-bundle/*.rpm \
+            release-bundle/*.apk \
+            release-bundle/*.pkg.tar.zst \
+            release-bundle/SHA256SUMS-linux-packages \
+            --repo "komawm/$PRODUCT" --clobber
+
+      - name: Sync AUR, Fedora Copr and optional Nix Cachix on stable channel
+        if: ${{ inputs.publish_distros && inputs.channel == 'stable' }}
+        run: |
+          set -euo pipefail
+          # 1. AUR binary recipe (<product>-bin)
+          if [[ -n "${AUR_SSH_PRIVATE_KEY:-}" ]]; then
+            ssh_dir="$(mktemp -d)"
+            chmod 0700 "$ssh_dir"
+            printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$ssh_dir/aur"
+            chmod 0600 "$ssh_dir/aur"
+            ssh-keyscan -H aur.archlinux.org >> "$ssh_dir/known_hosts" 2>/dev/null
+            export GIT_SSH_COMMAND="ssh -i $ssh_dir/aur -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
+            aur_repo="$(mktemp -d)"
+            if git clone "ssh://aur@aur.archlinux.org/${PRODUCT}-bin.git" "$aur_repo"; then
+              shopt -s nullglob
+              pkg_zsts=(release-bundle/*.pkg.tar.zst)
+              pkg_zst="${pkg_zsts[0]:-}"
+              if [[ -z "$pkg_zst" ]]; then
+                echo "::error::No Arch .pkg.tar.zst artifact found in release-bundle"
+                exit 1
+              fi
+              pkg_sha="$(sha256sum "$pkg_zst" | cut -d' ' -f1)"
+              pkg_base="$(basename "$pkg_zst")"
+              cat > "$aur_repo/PKGBUILD" <<EOF
+          pkgname=${PRODUCT}-bin
+          pkgver=${VERSION}
+          pkgrel=1
+          pkgdesc="Prebuilt ${PRODUCT} release binary from komawm"
+          arch=('x86_64')
+          url="https://komawm.org"
+          license=('GPL-3.0-or-later')
+          provides=('${PRODUCT}')
+          conflicts=('${PRODUCT}')
+          source=("${CDN_ORIGIN}/releases/${PRODUCT}/${TAG}/${pkg_base}")
+          sha256sums=('${pkg_sha}')
+          package() {
+            bsdtar -xf "${pkg_base}" -C "\$pkgdir" --exclude='.PKGINFO' --exclude='.BUILDINFO' --exclude='.MTREE'
+          }
+          EOF
+              git -C "$aur_repo" config user.name "komawm release bot"
+              git -C "$aur_repo" config user.email "noreply@komawm.org"
+              git -C "$aur_repo" add PKGBUILD
+              git -C "$aur_repo" diff --cached --quiet || {
+                git -C "$aur_repo" commit -m "chore(${PRODUCT}-bin): release ${VERSION}"
+                git -C "$aur_repo" push origin master
+              }
+            fi
+            rm -rf "$ssh_dir" "$aur_repo"
+          fi
+
+          # 2. Fedora Copr webhook/CLI build trigger
+          if [[ -n "${COPR_CONFIG:-}" ]]; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y python3-pip copr-cli || true
+            if command -v copr-cli >/dev/null 2>&1; then
+              install -d -m 0700 "$HOME/.config"
+              printf '%s\n' "$COPR_CONFIG" > "$HOME/.config/copr"
+              chmod 0600 "$HOME/.config/copr"
+              copr-cli buildscm --clone-url "https://github.com/komawm/${PRODUCT}.git" \
+                --commit "$SOURCE_COMMIT" --nowait "komawm/${PRODUCT}" || true
+              rm -f "$HOME/.config/copr"
+            fi
+          fi
+
+          # 3. Optional Nix Flake -> Cachix push (delegates to flake.nix inside komawm/<product> if present)
+          if [[ "$HAS_FLAKE" == "true" && -n "${CACHIX_AUTH_TOKEN:-}" ]]; then
+            echo "Upstream komawm/${PRODUCT}@${SOURCE_COMMIT} carries flake.nix; ready for Cachix push when Nix builder is enabled."
+          fi

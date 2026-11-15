@@ -2,13 +2,21 @@ schema_version = 1
 development_version = "0.0.1"
 accepted = false
 # The repository is published and its CD workflow may write to product
-# Releases, but only when manually dispatched with publish=true, approved by
-# the `release` environment, and given the PRODUCT_RELEASE_TOKEN secret.
+# Releases or R2 CDN, but only when manually dispatched with publish=true,
+# approved by the `release` environment, and given the required secrets.
 remote_changes_enabled = true
 publish_enabled = true
 automatic_publish = false
 infrastructure_license = "MIT"
 product_license = "GPL-3.0-or-later"
+
+[cdn]
+provider = "cloudflare-r2"
+bucket = "komawm"
+origin = "https://cdn.komawm.org"
+release_prefix = "releases"
+apt_prefix = "apt"
+install_prefix = "install"
 
 [archlinux]
 status = "template-unaccepted"
@@ -16,8 +24,16 @@ source_repository = "https://github.com/komawm/koma"
 source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 template = "archlinux/PKGBUILD.in"
+jiku_template = "archlinux/PKGBUILD.jiku.in"
 architectures = ["x86_64", "aarch64"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
+jiku_packaged_binaries = ["jikud", "jiku"]
+
+[nfpm]
+koma_config = "nfpm/koma.yaml"
+jiku_config = "nfpm/jiku.yaml"
+formats = ["deb", "rpm", "apk"]
+architectures = ["amd64", "arm64"]
 
 [debian]
 status = "template-unaccepted"
@@ -97,11 +113,23 @@ channel = "development"
 accepted = false
 publish_mode = "workflow_dispatch-with-release-environment"
 workflow = ".github/workflows/cd-archlinux.yml"
+multi_distro_workflow = ".github/workflows/cd-release.yml"
 publish_input_default = false
 environment = "release"
 required_secret = "PRODUCT_RELEASE_TOKEN"
 required_secret_permissions = "Contents: write on the target product repository only"
-products = ["koma"]
+environment_secrets = [
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_API_TOKEN",
+  "PRODUCT_RELEASE_TOKEN",
+  "GH_PAT",
+  "APT_GPG_PRIVATE_KEY",
+  "AUR_SSH_PRIVATE_KEY",
+  "COPR_CONFIG",
+  "CACHIX_AUTH_TOKEN",
+  "HOMEBREW_TAP_TOKEN",
+]
+products = ["koma", "jiku"]
 release_assets = ["koma-<pkgver>-<pkgrel>-x86_64.pkg.tar.zst", "SHA256SUMS-archlinux", "PACKAGE-MANIFEST-archlinux.toml"]
 
 [development_prerelease.matrix]
@@ -150,7 +178,7 @@ release_assets = [
 ]
 
 [jiku]
-status = "pending-runtime-implementation-and-acceptance"
+status = "incubation-prerelease-scaffold"
 
 [release]
 first_accepted_version = "0.1.0"
@@ -159,3 +187,9 @@ required_evidence = ["Green pinned product build", "Real source archive checksum
 [release.targets]
 koma = "komawm/koma"
 jiku = "komawm/jiku"
+
+[platforms]
+linux_architectures = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+macbook_linux_apple_silicon = { chips = ["M1", "M2", "M3", "M4"], target = "aarch64-unknown-linux-gnu", elf_max_page_size = 16384, kms_driver = "apple-dcp + mesa-asahi" }
+macbook_linux_intel = { chips = ["Core i5", "Core i7", "Core i9"], target = "x86_64-unknown-linux-gnu", kms_driver = "i915 / amdgpu" }
+bsd_experimental_targets = ["x86_64-unknown-freebsd", "aarch64-unknown-freebsd", "x86_64-unknown-openbsd", "aarch64-unknown-openbsd"]

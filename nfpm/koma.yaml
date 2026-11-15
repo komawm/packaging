@@ -1,0 +1,150 @@
+# yaml-language-server: $schema=https://nfpm.goreleaser.com/schema.json
+# nFPM v2 package specification for Koma (Wayland tiling compositor).
+# Consumed by `.github/workflows/cd-release.yml` for .deb, .rpm, and .apk builds.
+name: koma
+arch: ${PKG_ARCH}
+platform: linux
+version: ${PKG_VERSION}
+version_schema: semver
+release: 1
+section: x11
+priority: optional
+maintainer: Koma Maintainers <noreply@komawm.org>
+vendor: komawm
+homepage: https://komawm.org
+license: GPL-3.0-or-later
+description: |
+  Wayland tiling compositor designed for keyboard-driven desktops and concurrent GUI automation.
+  Separates window state, IPC, Smithay rendering, virtual-seat dispatch, and a sandboxed Phodopus Lua 5.4 policy layer.
+
+umask: 0o002
+
+contents:
+  - src: ${PKG_SRC_ROOT}/target/release/koma
+    dst: /usr/bin/koma
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${PKG_SRC_ROOT}/target/release/komactl
+    dst: /usr/bin/komactl
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${PKG_SRC_ROOT}/target/release/koma-mcp
+    dst: /usr/bin/koma-mcp
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${PKG_SRC_ROOT}/target/release/koma-overview
+    dst: /usr/bin/koma-overview
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${PKG_SRC_ROOT}/resources/koma-session
+    dst: /usr/bin/koma-session
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${PKG_SRC_ROOT}/resources/koma.desktop
+    dst: /usr/share/wayland-sessions/koma.desktop
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/resources/koma.service
+    dst: /usr/lib/systemd/user/koma.service
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/resources/koma-shutdown.target
+    dst: /usr/lib/systemd/user/koma-shutdown.target
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/resources/koma-portals.conf
+    dst: /usr/share/xdg-desktop-portal/koma-portals.conf
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/resources/greetd-config.toml
+    dst: /usr/share/doc/koma/examples/greetd-config.toml
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/examples/init.lua
+    dst: /usr/share/doc/koma/examples/init.lua
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/LICENSE
+    dst: /usr/share/licenses/koma/LICENSE
+    expand: true
+    file_info:
+      mode: 0644
+
+overrides:
+  deb:
+    depends:
+      - libc6
+      - libdrm2
+      - libegl1
+      - libfontconfig1
+      - libgbm1
+      - libgles2
+      - libinput10
+      - libseat1
+      - libudev1
+      - libwayland-client0
+      - libwayland-server0
+      - libxkbcommon0
+      - libdisplay-info2 | libdisplay-info1
+    recommends:
+      - xwayland-satellite
+      - xdg-desktop-portal-gnome
+      - polkitd
+    suggests:
+      - jiku
+  rpm:
+    depends:
+      - glibc
+      - libdrm
+      - libglvnd-egl
+      - libglvnd-gles
+      - fontconfig
+      - mesa-libgbm
+      - libinput
+      - libseat
+      - systemd-libs
+      - wayland-libs-client
+      - wayland-libs-server
+      - libxkbcommon
+      - libdisplay-info
+    recommends:
+      - xwayland-satellite
+      - xdg-desktop-portal-gnome
+      - polkit
+    suggests:
+      - jiku
+  apk:
+    depends:
+      - gcompat
+      - libdrm
+      - mesa-egl
+      - mesa-gbm
+      - mesa-gles
+      - fontconfig
+      - libinput-libs
+      - seatd-libs
+      - eudev-libs
+      - wayland-libs-client
+      - wayland-libs-server
+      - libxkbcommon
+      - libdisplay-info
+
+deb:
+  compression: zstd
+  fields:
+    Bugs: https://github.com/komawm/koma/issues
+
+rpm:
+  compression: zstd
+  summary: Wayland tiling compositor with sandboxed Lua 5.4 policy and automation IPC
