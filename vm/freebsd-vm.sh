@@ -824,6 +824,7 @@ cmd_koma_check() {
         if [ \"\$need_rustup\" -eq 1 ]; then
             target_tc=\"\${req_channel:-stable}\"
             rustup_ok=1
+            export RUSTUP_USE_CURL=1
             if ! command -v rustup >/dev/null 2>&1; then
                 if command -v rustup-init >/dev/null 2>&1; then
                     rustup-init -y --no-modify-path --profile minimal --default-toolchain \"\$target_tc\" || rustup_ok=0
