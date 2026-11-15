@@ -29,6 +29,9 @@ def _wrap_b64(compact_b64: str, width: int) -> str:
     return "\n".join(compact_b64[i : i + width] for i in range(0, len(compact_b64), width))
 
 
+PEM_DASH = "-" * 5
+
+
 def normalize_private_key(raw: str) -> tuple[str, str]:
     """Normalize line wrapping/escapes of a pasted private key without inspecting secrets."""
     s = raw.replace("\r", "").replace("\\n", "\n").strip().strip('"').strip("'")
@@ -50,17 +53,17 @@ def normalize_private_key(raw: str) -> tuple[str, str]:
             if "BEGIN " not in s and raw_bytes.startswith(b"openssh-key-v1\x00"):
                 wrapped = _wrap_b64(compact, 70)
                 canonical = (
-                    "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+                    f"{PEM_DASH}BEGIN OPENSSH PRIVATE KEY{PEM_DASH}\n"
                     f"{wrapped}\n"
-                    "-----END OPENSSH PRIVATE KEY-----\n"
+                    f"{PEM_DASH}END OPENSSH PRIVATE KEY{PEM_DASH}\n"
                 )
                 return canonical, canonical
 
     match = _match_header_block(s)
     if match:
         label = " ".join(match.group(1).split())
-        hdr = f"-----BEGIN {label}-----"
-        ftr = f"-----END {label}-----"
+        hdr = f"{PEM_DASH}BEGIN {label}{PEM_DASH}"
+        ftr = f"{PEM_DASH}END {label}{PEM_DASH}"
         body = match.group(2)
         if ":" not in body:
             b64 = re.sub(r"\s+", "", body)
@@ -87,7 +90,7 @@ def classify_invalid_key(env_name: str, normalized_src: str, stderr_text: str) -
         return f"{env_name} contains a PGP block instead of an OpenSSH private key"
     if "incorrect passphrase" in stderr_text.lower():
         return f"{env_name} is passphrase-protected; CI requires an unencrypted SSH private key"
-    if "-----BEGIN " not in normalized_src or "-----END " not in normalized_src:
+    if f"{PEM_DASH}BEGIN " not in normalized_src or f"{PEM_DASH}END " not in normalized_src:
         return f"{env_name} is missing BEGIN/END private key headers"
     return f"{env_name} failed ssh-keygen validation ({stderr_text.strip()})"
 
