@@ -11,31 +11,65 @@ import subprocess
 import sys
 from pathlib import Path
 
-HEADER_RE = re.compile(
-    r"(-----BEGIN [A-Z0-9 ]+-----)(.*?)(-----END [A-Z0-9 ]+-----)",
+KEY_LABEL_RE = re.compile(
+    r"(?:^|\s|[\"'])-{0,5}\s*BEGIN ([A-Z0-9 ]*?\b(?:PRIVATE|PUBLIC) KEY(?:\s+BLOCK)?)\s*(?:-{1,5}\s*|\s+)(.*?)\s*(?:-{1,5}|\s+-{0,5})\s*END \1\s*-{0,5}(?=\s|[\"']|$)",
     re.S,
 )
+STRICT_HYPHEN_RE = re.compile(
+    r"-{2,5}\s*BEGIN ([A-Z0-9 ]+?)\s*-{2,5}(.*?)-{2,5}\s*END \1\s*-{2,5}",
+    re.S,
+)
+
+
+def _match_header_block(text: str) -> re.Match[str] | None:
+    return STRICT_HYPHEN_RE.search(text) or KEY_LABEL_RE.search(text)
+
+
+def _wrap_b64(compact_b64: str, width: int) -> str:
+    return "\n".join(compact_b64[i : i + width] for i in range(0, len(compact_b64), width))
 
 
 def normalize_private_key(raw: str) -> tuple[str, str]:
     """Normalize line wrapping/escapes of a pasted private key without inspecting secrets."""
     s = raw.replace("\r", "").replace("\\n", "\n").strip().strip('"').strip("'")
-    if "-----BEGIN " not in s and not s.startswith(("ssh-", "ecdsa-")):
+    if "BEGIN " not in s and not s.startswith(("ssh-", "ecdsa-", "SHA256:", "/", "~/")):
+        compact = re.sub(r"\s+", "", s)
+        if compact and len(compact) % 4 in (2, 3):
+            compact += "=" * (4 - (len(compact) % 4))
         try:
-            decoded = base64.b64decode(re.sub(r"\s+", "", s), validate=True).decode("utf-8")
-            if "-----BEGIN " in decoded:
-                s = decoded.replace("\r", "").strip()
+            raw_bytes = base64.b64decode(compact, validate=True)
         except Exception:
-            pass
+            raw_bytes = b""
+        if raw_bytes:
+            try:
+                decoded = raw_bytes.decode("utf-8")
+                if "BEGIN " in decoded:
+                    s = decoded.replace("\r", "").strip()
+            except UnicodeDecodeError:
+                pass
+            if "BEGIN " not in s and raw_bytes.startswith(b"openssh-key-v1\x00"):
+                wrapped = _wrap_b64(compact, 70)
+                canonical = (
+                    "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+                    f"{wrapped}\n"
+                    "-----END OPENSSH PRIVATE KEY-----\n"
+                )
+                return canonical, canonical
 
-    match = HEADER_RE.search(s)
+    match = _match_header_block(s)
     if match:
-        hdr, body, ftr = match.group(1), match.group(2), match.group(3)
+        label = " ".join(match.group(1).split())
+        hdr = f"-----BEGIN {label}-----"
+        ftr = f"-----END {label}-----"
+        body = match.group(2)
         if ":" not in body:
             b64 = re.sub(r"\s+", "", body)
-            width = 70 if "OPENSSH" in hdr else 64
-            wrapped = "\n".join(b64[i : i + width] for i in range(0, len(b64), width))
-            return f"{hdr}\n{wrapped}\n{ftr}\n", s
+            width = 70 if "OPENSSH" in label else 64
+            wrapped = _wrap_b64(b64, width)
+            canonical = f"{hdr}\n{wrapped}\n{ftr}\n"
+            return canonical, canonical
+        canonical = f"{hdr}\n{body.strip()}\n{ftr}\n"
+        return canonical, canonical
 
     lines = [line.strip() for line in s.splitlines() if line.strip()]
     return ("\n".join(lines) + "\n") if lines else "", s
@@ -45,6 +79,10 @@ def classify_invalid_key(env_name: str, normalized_src: str, stderr_text: str) -
     """Return a strictly non-secret structural error classification."""
     if normalized_src.startswith(("ssh-ed25519", "ssh-rsa", "ecdsa-sha2-")):
         return f"{env_name} contains an OpenSSH PUBLIC key (.pub), not a private key"
+    if normalized_src.startswith("SHA256:"):
+        return f"{env_name} contains an SSH key fingerprint (SHA256:...), not the private key content"
+    if normalized_src.startswith(("/", "~/")) and "\n" not in normalized_src:
+        return f"{env_name} contains a file path rather than the private key file contents"
     if "PGP PRIVATE KEY" in normalized_src:
         return f"{env_name} contains a PGP block instead of an OpenSSH private key"
     if "incorrect passphrase" in stderr_text.lower():

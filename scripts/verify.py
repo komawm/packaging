@@ -482,6 +482,10 @@ def verify_prebuilt_templates(root: Path, config: dict) -> None:
                 "literal-newline": orig_key.replace("\n", "\\n"),
                 "extra-blanks": "\n\n" + orig_key + "\n\n",
                 "base64-wrapped": base64.b64encode(orig_key.encode("utf-8")).decode("ascii"),
+                "trimmed-hyphens": orig_key.replace("-----BEGIN", "--BEGIN")
+                .replace("-----END", "END")
+                .replace("KEY-----", "KEY--"),
+                "bare-openssh-b64": "\n".join(line for line in orig_key.splitlines() if not line.startswith("-----")),
             }
             for name, payload in variants.items():
                 out_key = ssh_dir / f"out_{name}"
@@ -498,16 +502,20 @@ def verify_prebuilt_templates(root: Path, config: dict) -> None:
                 if stat.S_IMODE(out_key.stat().st_mode) != 0o600:
                     raise SystemExit(f"write_ssh_key.py wrong file mode on {name}")
             pub_payload = (ssh_dir / "id_test.pub").read_text(encoding="utf-8")
-            bad_out = ssh_dir / "bad_pub"
-            bad_proc = subprocess.run(
-                [sys.executable, str(root / "scripts/write_ssh_key.py"), "--env", "TEST_SSH_KEY", "--output", str(bad_out)],
-                env=dict(os.environ, TEST_SSH_KEY=pub_payload),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if bad_proc.returncode == 0 or bad_out.exists() or "PUBLIC key" not in bad_proc.stderr:
-                raise SystemExit(f"write_ssh_key.py did not reject .pub cleanly: {bad_proc.stderr}")
+            for bad_name, bad_payload, expected_substr in (
+                ("pub", pub_payload, "PUBLIC key"),
+                ("fingerprint", "SHA256:abcdef123456", "fingerprint"),
+            ):
+                bad_out = ssh_dir / f"bad_{bad_name}"
+                bad_proc = subprocess.run(
+                    [sys.executable, str(root / "scripts/write_ssh_key.py"), "--env", "TEST_SSH_KEY", "--output", str(bad_out)],
+                    env=dict(os.environ, TEST_SSH_KEY=bad_payload),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if bad_proc.returncode == 0 or bad_out.exists() or expected_substr not in bad_proc.stderr:
+                    raise SystemExit(f"write_ssh_key.py did not reject {bad_name} cleanly: {bad_proc.stderr}")
 
 
 def verify_nfpm_specs(root: Path, config: dict) -> None:
