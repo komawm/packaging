@@ -853,6 +853,8 @@ cmd_koma_check() {
         uname -a
         rustc --version
         cargo --version
+        export CARGO_HTTP_MULTIPLEXING=false
+        export CARGO_NET_RETRY=8
         cargo check --workspace --all-targets --locked
         cargo test --workspace --locked
     " 2>&1 | tee "$log_file"
