@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import ast
+import base64
+import os
 from pathlib import Path
 import re
 import shutil
@@ -464,6 +466,48 @@ def verify_prebuilt_templates(root: Path, config: dict) -> None:
                 raise SystemExit(f"Linuxbrew formula {rb_path.name} missing expected class or depends_on :linux")
             if shutil.which("ruby"):
                 run_checked(["ruby", "-c", str(rb_path)], f"Linuxbrew {product}.rb syntax check")
+
+        if shutil.which("ssh-keygen"):
+            ssh_dir = tmp_dir / "ssh-key-test"
+            ssh_dir.mkdir()
+            key_path = ssh_dir / "id_test"
+            run_checked(
+                ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "verify-test", "-f", str(key_path)],
+                "generate throwaway ed25519 key",
+            )
+            orig_key = key_path.read_text(encoding="utf-8")
+            variants = {
+                "trailing-space": "\n".join(line + "  " for line in orig_key.splitlines()),
+                "space-collapsed": orig_key.replace("\n", " "),
+                "literal-newline": orig_key.replace("\n", "\\n"),
+                "extra-blanks": "\n\n" + orig_key + "\n\n",
+                "base64-wrapped": base64.b64encode(orig_key.encode("utf-8")).decode("ascii"),
+            }
+            for name, payload in variants.items():
+                out_key = ssh_dir / f"out_{name}"
+                env = dict(os.environ, TEST_SSH_KEY=payload)
+                proc = subprocess.run(
+                    [sys.executable, str(root / "scripts/write_ssh_key.py"), "--env", "TEST_SSH_KEY", "--output", str(out_key)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if proc.returncode != 0:
+                    raise SystemExit(f"write_ssh_key.py failed on {name}: {proc.stderr}")
+                if stat.S_IMODE(out_key.stat().st_mode) != 0o600:
+                    raise SystemExit(f"write_ssh_key.py wrong file mode on {name}")
+            pub_payload = (ssh_dir / "id_test.pub").read_text(encoding="utf-8")
+            bad_out = ssh_dir / "bad_pub"
+            bad_proc = subprocess.run(
+                [sys.executable, str(root / "scripts/write_ssh_key.py"), "--env", "TEST_SSH_KEY", "--output", str(bad_out)],
+                env=dict(os.environ, TEST_SSH_KEY=pub_payload),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if bad_proc.returncode == 0 or bad_out.exists() or "PUBLIC key" not in bad_proc.stderr:
+                raise SystemExit(f"write_ssh_key.py did not reject .pub cleanly: {bad_proc.stderr}")
 
 
 def verify_nfpm_specs(root: Path, config: dict) -> None:

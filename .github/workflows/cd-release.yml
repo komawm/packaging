@@ -615,10 +615,9 @@ jobs:
             zst_aarch64="$(sha256sum "release-bundle/${PRODUCT}-${VERSION}-aarch64-unknown-linux-gnu.tar.zst" | cut -d' ' -f1)"
             ssh_dir="$(mktemp -d)"
             chmod 0700 "$ssh_dir"
-            printf '%s\n' "$AUR_SSH_PRIVATE_KEY" | tr -d '\r' > "$ssh_dir/aur"
-            chmod 0600 "$ssh_dir/aur"
+            python3 scripts/write_ssh_key.py --env AUR_SSH_PRIVATE_KEY --output "$ssh_dir/aur"
             ssh-keyscan -H aur.archlinux.org >> "$ssh_dir/known_hosts" 2>/dev/null
-            export GIT_SSH_COMMAND="ssh -i $ssh_dir/aur -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
+            export GIT_SSH_COMMAND="ssh -i $ssh_dir/aur -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
             aur_repo="$(mktemp -d)"
             git clone "ssh://aur@aur.archlinux.org/${PRODUCT}-bin.git" "$aur_repo"
             git -C "$aur_repo" checkout -B master
