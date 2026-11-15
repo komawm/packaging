@@ -251,23 +251,19 @@ build_seed_image() {
 
     if [[ "$VM_FS" == "zfs" ]]; then
         cat >"$workdir/inst.cfg" <<EOF
-DISTRIBUTIONS="kernel.txz base.txz"
-BSDINSTALL_DISTDIR="/usr/freebsd-dist"
-nonInteractive="YES"
-ZFSBOOT_DISKS="vtbd0"
-ZFSBOOT_VDEV_TYPE="stripe"
-ZFSBOOT_BOOT_TYPE="UEFI"
-ZFSBOOT_SWAP_SIZE="2g"
-ZFSBOOT_CONFIRM_LAYOUT=""
+export nonInteractive="YES"
+export ZFSBOOT_DISKS="vtbd0"
+export ZFSBOOT_VDEV_TYPE="stripe"
+export ZFSBOOT_BOOT_TYPE="UEFI"
+export ZFSBOOT_SWAP_SIZE="2g"
+export ZFSBOOT_CONFIRM_LAYOUT=""
 #!/bin/sh
 set -eux
 EOF
     else
         cat >"$workdir/inst.cfg" <<EOF
-DISTRIBUTIONS="kernel.txz base.txz"
-BSDINSTALL_DISTDIR="/usr/freebsd-dist"
-nonInteractive="YES"
-PARTITIONS="vtbd0 GPT { auto freebsd-ufs /, 2G freebsd-swap }"
+export nonInteractive="YES"
+export PARTITIONS="vtbd0 GPT { 260M efi , auto freebsd-ufs /, 2G freebsd-swap }"
 #!/bin/sh
 set -eux
 EOF
@@ -315,6 +311,10 @@ PasswordAuthentication no
 UseDNS no
 __KOMA_SSHD__
 
+if [ -f /usr/local/etc/pkg/repos/FreeBSD.conf ]; then
+    printf 'FreeBSD-base: { enabled: no }\n' > /usr/local/etc/pkg/repos/FreeBSD.conf
+fi
+
 ssh-keygen -A
 EOF
     } >>"$workdir/inst.cfg"
@@ -333,13 +333,24 @@ for p in $(zpool list -H -o name 2>/dev/null || true); do
 done
 gpart destroy -F vtbd0 2>/dev/null || true
 
+export TERM="vt100"
+stty rows 25 cols 80 2>/dev/null || true
 export nonInteractive="YES"
-export BSDINSTALL_DISTDIR="/usr/freebsd-dist"
 export BSDINSTALL_CHROOT="/mnt"
 export BSDINSTALL_TMPETC="/tmp/bsdinstall_etc"
 export BSDINSTALL_TMPBOOT="/tmp/bsdinstall_boot"
 export PATH_FSTAB="/tmp/bsdinstall_etc/fstab"
-export DISTRIBUTIONS="kernel.txz base.txz"
+if [ -f /usr/freebsd-dist/base.txz ] && [ -f /usr/freebsd-dist/kernel.txz ]; then
+    export BSDINSTALL_DISTDIR="/usr/freebsd-dist"
+    export DISTRIBUTIONS="kernel.txz base.txz"
+elif [ -f /usr/freebsd-packages/repos/FreeBSD-base-offline.conf ]; then
+    export DISTRIBUTIONS=""
+    export COMPONENTS="base"
+    export BSDINSTALL_PKG_REPOS_DIR="/usr/freebsd-packages/repos"
+else
+    export DISTRIBUTIONS=""
+    export COMPONENTS="base"
+fi
 mkdir -p /tmp/bsdinstall_etc /tmp/bsdinstall_boot
 
 bsdinstall script /tmp/seed/inst.cfg </dev/null
@@ -676,7 +687,7 @@ cmd_provision() {
     log "provisioning FreeBSD packages and sudo configuration"
     run_ssh "set -eu
         export ASSUME_ALWAYS_YES=yes
-        pkg bootstrap -y
+        pkg -N >/dev/null 2>&1 || pkg bootstrap -y
         pkg update -f
         pkg install -y \
             pkgconf git curl ca_root_nss sudo \
