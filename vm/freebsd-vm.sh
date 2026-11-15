@@ -321,8 +321,8 @@ EOF
 
     cat >"$workdir/install.sh" <<'EOF'
 #!/bin/sh
-set -eux
 trap 'echo "===FREEBSD_INSTALL_FAILED==="' EXIT
+set -eux
 
 kldload -nq zfs 2>/dev/null || true
 mount -t tmpfs tmpfs /var
@@ -486,7 +486,7 @@ def wait_for(patterns: list[str], timeout: float, label: str, idle_poke: bytes |
             m = pat.search(clean_buf)
             if m:
                 return pat.pattern
-        if "===FREEBSD_INSTALL_FAILED===" in clean_buf:
+        if re.search(r"^===FREEBSD_INSTALL_FAILED===\s*$", clean_buf, re.MULTILINE):
             raise RuntimeError("guest reported ===FREEBSD_INSTALL_FAILED===")
         rx = pump(0.5)
         if rx:
@@ -539,7 +539,7 @@ try:
         "/bin/sh /tmp/seed/install.sh\r"
     )
     conn.sendall(bootstrap.encode("ascii"))
-    wait_for([r"===FREEBSD_INSTALL_DONE==="], timeout=1800.0, label="===FREEBSD_INSTALL_DONE===")
+    wait_for([r"^===FREEBSD_INSTALL_DONE===\s*$"], timeout=1800.0, label="===FREEBSD_INSTALL_DONE===")
 
     time.sleep(1.0)
     conn.sendall(b"poweroff\r")
