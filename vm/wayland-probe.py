@@ -872,7 +872,6 @@ class _PaintSurfaceApp:
         self.pending_height = self.height
         self.bar_h = self._compute_bar_height(self.height)
         self.canvas = bytearray()
-        self._reset_canvas(clear_only=False)
 
         self.active_color_idx = 0
         self.brush_radius = 7
@@ -905,7 +904,7 @@ class _PaintSurfaceApp:
         self.pointer_id = 0
         # Each slot: {"pool_id": int, "buf_id": int, "fd": int, "mm": mmap.mmap, "w": int, "h": int, "busy": bool}
         self.slots: list[dict[str, Any]] = [{}, {}]
-        self._render_toolbar()
+        self._reset_canvas(clear_only=False)
 
     @staticmethod
     def _compute_bar_height(height: int) -> int:
