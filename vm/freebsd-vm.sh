@@ -340,6 +340,7 @@ export BSDINSTALL_TMPETC="/tmp/bsdinstall_etc"
 export BSDINSTALL_TMPBOOT="/tmp/bsdinstall_boot"
 export PATH_FSTAB="/tmp/bsdinstall_etc/fstab"
 export DISTRIBUTIONS="kernel.txz base.txz"
+mkdir -p /tmp/bsdinstall_etc /tmp/bsdinstall_boot
 
 bsdinstall script /tmp/seed/inst.cfg </dev/null
 
@@ -422,7 +423,7 @@ serial_sock = sys.argv[1]
 serial_log = sys.argv[2]
 qemu_cmd = sys.argv[3:]
 
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]|\r")
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_78]|\r")
 
 if os.path.exists(serial_sock):
     os.unlink(serial_sock)
@@ -526,7 +527,7 @@ try:
     wait_for([r"RETURN for /bin/sh:"], timeout=180.0, label="single-user shell prompt")
     clean_buf = ""
     conn.sendall(b"\r")
-    wait_for([r"(?:^|\n)#\s*$"], timeout=60.0, label="single-user # prompt", idle_poke=b"\r")
+    wait_for([r"(?:^|\n)(?:root@[^\n#]*#\s*|#\s*)$"], timeout=60.0, label="single-user # prompt", idle_poke=b"\r")
 
     clean_buf = ""
     bootstrap = (
