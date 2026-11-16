@@ -148,8 +148,10 @@ Design notes:
   `--provenance`. Because provenance binds to the workflow repository, the
   generated `repository` field points at `komawm/packaging` with
   `directory: npm/jiku`; `homepage` and `bugs` point at `komawm/jiku`.
-- Development prereleases publish under the `development` dist-tag
-  (`channel=development`); `channel=stable` publishes `latest`.
+- Development prereleases publish under the `development` dist-tag. The registry
+  also assigns `latest` to the first version ever published, so after the first run
+  both tags can resolve to the same `v0.0.x` build; later `latest` movements only
+  happen on a publish made with that tag (`channel=stable`).
 - Republishing an existing version is a no-op, not a failure, so a partially
   failed run can be re-dispatched.
 
