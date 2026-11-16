@@ -140,8 +140,10 @@ Design notes:
   than a postinstall download, so installation is offline-safe and reproducible.
 - Each platform archive is verified against `SHA256SUMS-<arch>` before its
   binaries are extracted. A mismatch aborts the job.
-- The launcher ships `skills/jiku-desktop-orchestration`; the skill's MIT
-  `LICENSE` is asserted to travel with it.
+- The launcher bundles `skills/jiku-desktop-orchestration` only when the tagged
+  revision contains it. `v0.0.1` predates the skill catalog, so that package ships
+  no skill; a present-but-broken skill directory aborts the stage instead of shipping
+  half a skill, and the skill's MIT `LICENSE` is asserted to travel with it.
 - `publishConfig.provenance` is enabled and the job publishes with
   `--provenance`. Because provenance binds to the workflow repository, the
   generated `repository` field points at `komawm/packaging` with
