@@ -51,6 +51,7 @@ def main() -> None:
         verify_workflows(root, config)
     elif config["publish_enabled"] is not False:
         raise SystemExit("publish_enabled must be a boolean")
+    verify_npm_packages(root, config)
     print("Packaging metadata, templates, nFPM specs, and workflow gates passed; no package was built or accepted")
 
 
@@ -659,7 +660,14 @@ def verify_workflow_universal(workflow_path: Path) -> str:
     workflow = workflow_path.read_text(encoding="utf-8")
     if not re.search(r"^permissions:\n  contents: read\n(?!  )", workflow, re.M):
         raise SystemExit(f"{workflow_path.name} top-level permissions must be exactly contents: read")
-    if re.search(r"^\s+[a-z-]+: write\b", workflow, re.M):
+    # Repository-write scopes stay forbidden. `id-token: write` is allowed because it
+    # only mints an OIDC token for npm provenance; it grants no GitHub write access.
+    git_token_write = re.compile(
+        r"^\s+(?:contents|actions|packages|pull-requests|issues|deployments|"
+        r"security-events|statuses|checks|discussions|pages): write\b",
+        re.M,
+    )
+    if git_token_write.search(workflow):
         raise SystemExit(f"{workflow_path.name} must not grant write permissions to GITHUB_TOKEN")
     for line in workflow.splitlines():
         if re.match(r"^\s*(?:-\s+)?uses:", line) and not SHA_PIN.match(line):
@@ -672,8 +680,14 @@ def verify_workflow_universal(workflow_path: Path) -> str:
 
     jobs = all_jobs(workflow)
     for job_name, block in jobs.items():
-        if job_name != "publish" and "secrets." in block:
+        if "secrets." not in block:
+            continue
+        # Secret access is limited to publishing jobs, and every such job must run
+        # behind the protected `release` environment so approval gates apply.
+        if job_name != "publish" and not job_name.startswith("publish-"):
             raise SystemExit(f"Non-publish job {job_name!r} in {workflow_path.name} must not reference secrets")
+        if "    environment: release\n" not in block:
+            raise SystemExit(f"Publishing job {job_name!r} in {workflow_path.name} must run under environment: release")
         for image_match in re.finditer(r"^\s+(?:image|CONTAINER_IMAGE):\s*(\S+)$", block, re.M):
             image_ref = image_match.group(1)
             if not DIGEST_IMAGE.fullmatch(image_ref):
@@ -731,6 +745,50 @@ def verify_prerelease_metadata(section: dict, config: dict, root: Path, key: str
     if "products" in section and not set(section["products"]) <= set(config["release"]["targets"]):
         raise SystemExit("Development prerelease products must have a release target")
     return workflow_path
+
+
+def verify_npm_packages(root: Path, config: dict) -> None:
+    """Validate the generated npm distribution metadata and its launcher template."""
+    section = config.get("npm")
+    if not isinstance(section, dict):
+        raise SystemExit("packaging.toml is missing [npm] metadata")
+    if section.get("scope") != "@koma-wm" or section.get("package") != "jiku":
+        raise SystemExit("[npm] must publish jiku under the @koma-wm scope")
+    if section.get("platforms") != ["x64", "arm64"]:
+        raise SystemExit("[npm] platforms must list the x64 and arm64 Linux targets")
+    if section.get("provenance") is not True:
+        raise SystemExit("[npm] must keep provenance enabled")
+    if section.get("publish_input") != "publish_npm":
+        raise SystemExit("[npm] publish input must be publish_npm")
+    if "NPM_TOKEN" not in section.get("requires", []):
+        raise SystemExit("[npm] requires must declare NPM_TOKEN")
+
+    launcher = root / str(section.get("launcher_dir"))
+    if not launcher.is_dir():
+        raise SystemExit(f"[npm] launcher directory missing: {launcher}")
+    for relative in ("launch.js", "bin/jiku.js", "bin/jikud.js", "README.md"):
+        if not (launcher / relative).is_file():
+            raise SystemExit(f"[npm] launcher is missing {relative}")
+
+    stager = root / "scripts/stage_npm.py"
+    if not stager.is_file():
+        raise SystemExit("[npm] scripts/stage_npm.py is missing")
+    selftest = root / "scripts/selftest_stage_npm.py"
+    if not selftest.is_file():
+        raise SystemExit("[npm] scripts/selftest_stage_npm.py is missing")
+    ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    if "selftest_stage_npm.py" not in ci:
+        raise SystemExit("ci.yml must run the npm staging smoke test")
+
+    pre = config.get("development_prerelease", {})
+    if "NPM_TOKEN" not in set(pre.get("environment_secrets", [])):
+        raise SystemExit("[npm] NPM_TOKEN must be declared in development_prerelease.environment_secrets")
+
+    workflow = (root / ".github/workflows/cd-release.yml").read_text(encoding="utf-8")
+    if "publish_npm" not in workflow or "stage_npm.py" not in workflow:
+        raise SystemExit("cd-release.yml does not wire the npm publish job")
+    if "npm publish" not in workflow or "--provenance" not in workflow:
+        raise SystemExit("cd-release.yml must publish with npm and --provenance")
 
 
 def verify_workflows(root: Path, config: dict) -> None:

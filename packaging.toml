@@ -132,6 +132,7 @@ environment_secrets = [
   "COPR_CONFIG",
   "CACHIX_AUTH_TOKEN",
   "HOMEBREW_TAP_TOKEN",
+  "NPM_TOKEN",
 ]
 products = ["koma", "jiku"]
 release_assets = ["koma-<pkgver>-<pkgrel>-x86_64.pkg.tar.zst", "SHA256SUMS-archlinux", "PACKAGE-MANIFEST-archlinux.toml"]
@@ -191,6 +192,18 @@ required_evidence = ["Green pinned product build", "Real source archive checksum
 [release.targets]
 koma = "komawm/koma"
 jiku = "komawm/jiku"
+
+[npm]
+status = "generated-in-cd"
+scope = "@koma-wm"
+package = "jiku"
+launcher_dir = "npm/jiku"
+platforms = ["x64", "arm64"]
+dist_tag_development = "development"
+dist_tag_stable = "latest"
+provenance = true
+publish_input = "publish_npm"
+requires = ["NPM_TOKEN"]
 
 [platforms]
 linux_architectures = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]

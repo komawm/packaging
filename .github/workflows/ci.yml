@@ -50,6 +50,9 @@ jobs:
             bash -n "$tmpdir/PKGBUILD.$prod"
           done
 
+      - name: Smoke-test npm package staging
+        run: python3 scripts/selftest_stage_npm.py
+
       - name: Run ShellCheck on templates and scripts
         run: |
           shellcheck -s bash -e SC2034,SC2154 archlinux/PKGBUILD.in archlinux/PKGBUILD.jiku.in
