@@ -167,15 +167,27 @@ def stage_launcher(
     shutil.copy2(template_dir / "README.md", package_dir / "README.md")
     shutil.copy2(source_root / "LICENSE", package_dir / "LICENSE")
 
+    # The bundled skill is optional: tags cut before the skill catalog existed
+    # (for example v0.0.1) still ship a usable CLI. A present-but-broken skill
+    # directory is an error, because half a skill is worse than none.
     skills_source = source_root / "skills"
-    if not skills_source.is_dir():
-        fail(f"{skills_source} is missing; the launcher bundles the agent skill")
-    skill_license = skills_source / "jiku-desktop-orchestration" / "LICENSE"
-    if not skill_license.is_file() or not skill_license.read_text(
-        encoding="utf-8"
-    ).startswith("MIT License"):
-        fail("skills/jiku-desktop-orchestration/LICENSE must ship MIT text")
-    shutil.copytree(skills_source, package_dir / "skills", dirs_exist_ok=True)
+    skill_dir = skills_source / "jiku-desktop-orchestration"
+    bundle_skill = skill_dir.is_dir()
+    files = ["bin", "launch.js", "LICENSE", "README.md"]
+    if bundle_skill:
+        skill_license = skill_dir / "LICENSE"
+        if not skill_license.is_file() or not skill_license.read_text(
+            encoding="utf-8"
+        ).startswith("MIT License"):
+            fail("skills/jiku-desktop-orchestration/LICENSE must ship MIT text")
+        shutil.copytree(skills_source, package_dir / "skills", dirs_exist_ok=True)
+        files.insert(2, "skills")
+    else:
+        print(
+            f"::warning::{skill_dir} is absent at this revision; "
+            "the launcher will not bundle an agent skill",
+            file=sys.stderr,
+        )
 
     write_json(
         package_dir / "package.json",
@@ -188,7 +200,7 @@ def stage_launcher(
             ),
             "license": "GPL-3.0-or-later",
             "bin": {"jiku": "bin/jiku.js", "jikud": "bin/jikud.js"},
-            "files": ["bin", "launch.js", "skills", "LICENSE", "README.md"],
+            "files": files,
             "optionalDependencies": {
                 f"{scope}/jiku-linux-x64": version,
                 f"{scope}/jiku-linux-arm64": version,

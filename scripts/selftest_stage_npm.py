@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -109,6 +110,7 @@ def main() -> int:
         assert (
             out / "jiku" / "skills" / "jiku-desktop-orchestration" / "LICENSE"
         ).is_file()
+        assert "skills" in launcher["files"]
         assert (out / "jiku" / "bin" / "jiku.js").stat().st_mode & 0o111
 
         assert x64["os"] == ["linux"] and x64["cpu"] == ["x64"]
@@ -123,6 +125,30 @@ def main() -> int:
                 )
             assert (out / arch / "LICENSE").read_text().startswith("GNU GENERAL")
 
+        # A tag without the skill catalog still ships a usable launcher.
+        shutil.rmtree(source / "skills")
+        without_skill = stage(base / "noskill", artifacts, source)
+        if without_skill.returncode != 0:
+            print(without_skill.stderr, file=sys.stderr)
+            raise SystemExit("stage_npm.py rejected a tag without the skill catalog")
+        plain = json.loads(
+            (
+                base / "noskill" / "out" / "@koma-wm" / "jiku" / "package.json"
+            ).read_text()
+        )
+        assert "skills" not in plain["files"], plain["files"]
+        assert not (base / "noskill" / "out" / "@koma-wm" / "jiku" / "skills").exists()
+
+        # A present-but-broken skill directory must abort, not ship half a skill.
+        (source / "skills" / "jiku-desktop-orchestration").mkdir(parents=True)
+        (source / "skills" / "jiku-desktop-orchestration" / "LICENSE").write_text(
+            "GPL-3.0-or-later\n", encoding="utf-8"
+        )
+        broken_skill = stage(base / "badskill", artifacts, source)
+        if broken_skill.returncode == 0:
+            raise SystemExit("stage_npm.py accepted a non-MIT skill license")
+        shutil.rmtree(source / "skills")
+
         # A corrupted archive must abort before any package is written.
         sums = artifacts / "SHA256SUMS-amd64"
         sums.write_text("0" * 64 + "  jiku-0.0.1-x86_64-unknown-linux-gnu.tar.gz\n")
@@ -130,7 +156,10 @@ def main() -> int:
         if broken.returncode == 0:
             raise SystemExit("stage_npm.py accepted a checksum mismatch")
 
-    print("npm staging smoke test passed (3 packages, checksum failure aborts)")
+    print(
+        "npm staging smoke test passed "
+        "(3 packages, optional skill, checksum failure aborts)"
+    )
     return 0
 
 
