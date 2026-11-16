@@ -55,6 +55,11 @@ on:
         type: boolean
         required: false
         default: false
+      publish_npm:
+        description: Publish @koma-wm/jiku npm platform packages and launcher (jiku only)
+        type: boolean
+        required: false
+        default: false
       check_bsd:
         description: Run experimental FreeBSD and OpenBSD cross-target portability checks (x86_64 & aarch64)
         type: boolean
@@ -675,3 +680,96 @@ jobs:
           if [[ "$HAS_FLAKE" == "true" && -n "${CACHIX_AUTH_TOKEN:-}" ]]; then
             echo "Upstream komawm/${PRODUCT}@${SOURCE_COMMIT} carries flake.nix; ready for Cachix push when Nix builder is enabled."
           fi
+
+  publish-npm:
+    name: Publish @koma-wm/jiku npm packages
+    if: ${{ inputs.publish && inputs.publish_npm && inputs.product == 'jiku' }}
+    needs: [resolve, build-linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PRODUCT: ${{ inputs.product }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.resolve.outputs.commit }}
+      SOURCE_SHA256: ${{ needs.resolve.outputs.source_sha256 }}
+      NPM_SCOPE: "@koma-wm"
+      NPM_TAG: ${{ inputs.channel == 'stable' && 'latest' || 'development' }}
+      NODE_VERSION: "22.20.0"
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node for npm publish
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+
+      - name: Download Linux build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: linux-packages-${{ inputs.product }}-*
+          path: ${{ runner.temp }}/npm-artifacts
+
+      - name: Fetch verified upstream source for the bundled skill
+        env:
+          STAGE_DIR: ${{ runner.temp }}/npm-source
+        run: |
+          set -euo pipefail
+          install -d "$STAGE_DIR"
+          src_tar="$STAGE_DIR/${PRODUCT}-${SOURCE_COMMIT}.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/komawm/${PRODUCT}/archive/${SOURCE_COMMIT}.tar.gz" \
+            -o "$src_tar"
+          echo "${SOURCE_SHA256}  ${src_tar}" | sha256sum --check --strict
+          tar -xzf "$src_tar" -C "$STAGE_DIR"
+          echo "SOURCE_ROOT=$STAGE_DIR/${PRODUCT}-${SOURCE_COMMIT}" >> "$GITHUB_ENV"
+
+      - name: Stage npm packages from checksummed artifacts
+        env:
+          OUT_DIR: ${{ runner.temp }}/npm-packages
+          ARTIFACTS: ${{ runner.temp }}/npm-artifacts
+        run: |
+          set -euo pipefail
+          python3 scripts/stage_npm.py \
+            --version "$VERSION" \
+            --artifacts "$ARTIFACTS" \
+            --source-root "$SOURCE_ROOT" \
+            --out "$OUT_DIR" \
+            --scope "$NPM_SCOPE" > "$RUNNER_TEMP/npm-stage.json"
+          python3 -c 'import json,sys;r=json.load(open(sys.argv[1]));print("staged %d package(s) for %s" % (len(r["publish_order"]), r["version"]))' "$RUNNER_TEMP/npm-stage.json"
+          find "$OUT_DIR" -name package.json -print
+
+      - name: Publish packages in dependency order
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          OUT_DIR: ${{ runner.temp }}/npm-packages
+        run: |
+          set -euo pipefail
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "::error::NPM_TOKEN is not configured in the release environment" >&2
+            exit 1
+          fi
+          npm --version
+          while IFS= read -r dir; do
+            name="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["name"])' "$dir/package.json")"
+            if npm view "${name}@${VERSION}" version >/dev/null 2>&1; then
+              echo "skip ${name}@${VERSION}: already published"
+              continue
+            fi
+            echo "publishing ${name}@${VERSION} (dist-tag ${NPM_TAG})"
+            npm publish "$dir" --access public --provenance --tag "$NPM_TAG"
+          done < <(python3 -c 'import json,sys;print("\n".join(json.load(open(sys.argv[1]))["publish_order"]))' "$RUNNER_TEMP/npm-stage.json")
+
+      - name: Report published packages
+        run: |
+          set -euo pipefail
+          for pkg in "${NPM_SCOPE}/jiku" "${NPM_SCOPE}/jiku-linux-x64" "${NPM_SCOPE}/jiku-linux-arm64"; do
+            npm view "${pkg}@${VERSION}" dist.tarball 2>/dev/null || echo "::warning::${pkg}@${VERSION} not visible yet"
+          done

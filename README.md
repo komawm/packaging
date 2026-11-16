@@ -35,6 +35,7 @@ starts at `v0.1.0`.
 | [Homebrew on Linux](https://github.com/komawm/packaging/blob/main/homebrew/README.md) | `x86_64`, `aarch64` (`depends_on :linux`) | `template-unaccepted` | CPU-agnostic Linuxbrew source formula; macOS is excluded |
 | [FreeBSD](https://github.com/komawm/packaging/blob/main/freebsd/README.md) | `amd64`, `aarch64` (`FreeBSD 15+`) | `template-unaccepted-experimental` | `runtime_verified = false`; CI builds `FreeBSD 15.1 amd64` in QEMU VM |
 | [OpenBSD](https://github.com/komawm/packaging/blob/main/openbsd/README.md) | `amd64`, `aarch64` (`OpenBSD 8+`) | `template-unaccepted-experimental` | `runtime_verified = false`; CI validates `OpenBSD 8.0 amd64` portable crates in VM |
+| [npm](https://github.com/komawm/packaging/blob/main/docs/release.md#npm-distribution-koma-wmjiku) | `linux-x64`, `linux-arm64` (glibc), Jiku only | `generated-in-cd` | `@koma-wm/jiku` launcher plus platform packages, published from checksummed artifacts with provenance |
 
 ### Apple Silicon (M1–M4) & Intel MacBook Linux notes
 
@@ -60,12 +61,14 @@ and publish only on explicit manual dispatch inputs (`publish=true` or
 gh workflow run cd-archlinux.yml -f product=koma -f tag=v0.0.1 -f publish=false --repo komawm/packaging
 gh workflow run cd-release.yml -f product=koma -f tag=v0.0.1 -f channel=dev --repo komawm/packaging
 gh workflow run cd-release-matrix.yml -f product=koma -f tag=v0.0.1 -f channel=linux -f publish=false --repo komawm/packaging
+gh workflow run cd-release.yml -f product=jiku -f tag=v0.0.1 -f channel=development -f publish=true -f publish_npm=true --repo komawm/packaging
 ```
 
 Unified R2 CDN releases publish immutable `.tar.zst`, `.deb`, `.rpm`, `.apk`,
 and `.pkg.tar.zst` bundles (via [nFPM specs](https://github.com/komawm/packaging/tree/main/nfpm)
 and native `makepkg`) plus a GPG-signed deb822 APT index to
-`https://cdn.komawm.org`. Credential setup and verification steps are in the
+`https://cdn.komawm.org`. Jiku additionally publishes the `@koma-wm/jiku` npm
+launcher and its `linux-x64` / `linux-arm64` platform packages. Credential setup and verification steps are in the
 [release runbook](https://github.com/komawm/packaging/blob/main/docs/release.md#development-prerelease-cd-v00x).
 
 Checks run locally and in [ci.yml](https://github.com/komawm/packaging/blob/main/.github/workflows/ci.yml).
