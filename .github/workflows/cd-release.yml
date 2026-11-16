@@ -162,7 +162,7 @@ jobs:
 
   build-linux:
     name: Build Linux packages (${{ matrix.nfpm_arch }})
-    if: ${{ !inputs.publish || inputs.publish_r2 || inputs.publish_github }}
+    if: ${{ !inputs.publish || inputs.publish_r2 || inputs.publish_github || inputs.publish_npm }}
     needs: resolve
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -314,7 +314,7 @@ jobs:
 
   build-archlinux:
     name: Build Arch Linux package (x86_64)
-    if: ${{ !inputs.publish || inputs.publish_r2 || inputs.publish_github }}
+    if: ${{ !inputs.publish || inputs.publish_r2 || inputs.publish_github || inputs.publish_npm }}
     needs: resolve
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -710,6 +710,22 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
+
+      - name: Verify npm credentials
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "::error::NPM_TOKEN is not configured in the release environment" >&2
+            exit 1
+          fi
+          if ! who="$(npm whoami 2>/dev/null)"; then
+            echo "::error::NPM_TOKEN is invalid, expired, or lacks registry access" >&2
+            exit 1
+          fi
+          echo "authenticated to the npm registry as ${who}"
+          echo "target scope: ${NPM_SCOPE} (the account must own or belong to it)"
 
       - name: Download Linux build artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
