@@ -56,8 +56,9 @@ def build_fixture(base: Path) -> tuple[Path, Path]:
             capture_output=True,
             text=True,
         ).stdout.split()[0]
+        # The release build runs `sha256sum ./*`, so checksum entries carry a "./" prefix.
         (artifacts / f"SHA256SUMS-{nfpm_arch}").write_text(
-            f"{digest}  {bundle.name}\n", encoding="utf-8"
+            f"{digest}  ./{bundle.name}\n", encoding="utf-8"
         )
     return artifacts, source
 

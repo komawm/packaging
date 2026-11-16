@@ -31,4 +31,4 @@ stage-npm version artifacts source out="dist/npm":
 
 # Verify the staged npm trees pack cleanly without contacting the registry.
 pack-npm out="dist/npm":
-    for dir in "{{out}}"/@koma-wm/*; do (cd "$dir" && npm pack --dry-run >/dev/null && echo "packed $dir"); done
+    for dir in "{{out}}"/@koma-wm/*; do (cd "$dir" && npm pack --dry-run >/dev/null) || exit 1; echo "packed $dir"; done

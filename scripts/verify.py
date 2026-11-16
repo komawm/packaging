@@ -680,14 +680,14 @@ def verify_workflow_universal(workflow_path: Path) -> str:
 
     jobs = all_jobs(workflow)
     for job_name, block in jobs.items():
-        if "secrets." not in block:
-            continue
         # Secret access is limited to publishing jobs, and every such job must run
         # behind the protected `release` environment so approval gates apply.
-        if job_name != "publish" and not job_name.startswith("publish-"):
-            raise SystemExit(f"Non-publish job {job_name!r} in {workflow_path.name} must not reference secrets")
-        if "    environment: release\n" not in block:
-            raise SystemExit(f"Publishing job {job_name!r} in {workflow_path.name} must run under environment: release")
+        if "secrets." in block:
+            if job_name != "publish" and not job_name.startswith("publish-"):
+                raise SystemExit(f"Non-publish job {job_name!r} in {workflow_path.name} must not reference secrets")
+            if "    environment: release\n" not in block:
+                raise SystemExit(f"Publishing job {job_name!r} in {workflow_path.name} must run under environment: release")
+        # Container pinning applies to every job, with or without secrets.
         for image_match in re.finditer(r"^\s+(?:image|CONTAINER_IMAGE):\s*(\S+)$", block, re.M):
             image_ref = image_match.group(1)
             if not DIGEST_IMAGE.fullmatch(image_ref):

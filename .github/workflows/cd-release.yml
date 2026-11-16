@@ -743,7 +743,7 @@ jobs:
             --source-root "$SOURCE_ROOT" \
             --out "$OUT_DIR" \
             --scope "$NPM_SCOPE" > "$RUNNER_TEMP/npm-stage.json"
-          python3 -c 'import json,sys;r=json.load(open(sys.argv[1]));print(f"staged {len(r[\"publish_order\"])} package(s) for {r[\"version\"]}")' "$RUNNER_TEMP/npm-stage.json"
+          python3 -c 'import json,sys;r=json.load(open(sys.argv[1]));print("staged %d package(s) for %s" % (len(r["publish_order"]), r["version"]))' "$RUNNER_TEMP/npm-stage.json"
           find "$OUT_DIR" -name package.json -print
 
       - name: Publish packages in dependency order

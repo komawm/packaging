@@ -57,7 +57,8 @@ def parse_sums(path: Path) -> dict[str, str]:
         if len(parts) != 2:
             fail(f"malformed checksum line in {path}: {line!r}")
         digest, name = parts
-        sums[name.lstrip("*")] = digest
+        # `sha256sum ./*` writes "./name", and `-b` writes "*name".
+        sums[name.lstrip("*").rsplit("/", 1)[-1]] = digest
     return sums
 
 
