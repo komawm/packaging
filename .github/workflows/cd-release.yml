@@ -268,6 +268,20 @@ jobs:
             ./target/release/jikud --validate-config --config examples/config.toml --policy examples/init.lua
             bins=(jikud jiku)
           fi
+          # Shell completions are generated from the binaries that were just
+          # smoke-checked, so they cannot drift from the CLI surface.
+          comp_dir="$src_root/completions"
+          install -d "$comp_dir"
+          for shell in bash zsh fish; do
+            for b in "${bins[@]}"; do
+              case "$b" in
+                koma|komactl|jiku)
+                  "$src_root/target/release/$b" completions "$shell" > "$comp_dir/$b.$shell"
+                  ;;
+              esac
+            done
+          done
+          ls -l "$comp_dir"
           popd >/dev/null
 
           # Stage portable .tar.zst bundle
@@ -281,6 +295,9 @@ jobs:
           cp -R "$src_root/examples" "$bundle_dir/examples"
           if [[ -d "$src_root/skills" ]]; then
             cp -R "$src_root/skills" "$bundle_dir/skills"
+          fi
+          if [[ -d "$src_root/completions" ]]; then
+            cp -R "$src_root/completions" "$bundle_dir/completions"
           fi
           install -m 0644 "$src_root/LICENSE" "$bundle_dir/LICENSE"
           install -m 0644 "$src_root/README.md" "$bundle_dir/README.md"

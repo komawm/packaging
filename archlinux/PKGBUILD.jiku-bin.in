@@ -24,6 +24,17 @@ package() {
     install -Dm644 resources/jikud.service "$pkgdir/usr/lib/systemd/user/jikud.service"
     install -Dm644 examples/config.toml "$pkgdir/usr/share/doc/jiku/examples/config.toml"
     install -Dm644 examples/init.lua "$pkgdir/usr/share/doc/jiku/examples/init.lua"
-    install -Dm644 skills/SKILL.md "$pkgdir/usr/share/doc/jiku/skills/SKILL.md"
+    if [[ -d skills ]]; then
+        install -d "$pkgdir/usr/share/doc/jiku/skills"
+        cp -R skills/. "$pkgdir/usr/share/doc/jiku/skills/"
+    fi
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/jiku/LICENSE"
+    if [[ -d completions ]]; then
+        install -d "$pkgdir/usr/share/bash-completion/completions" \
+            "$pkgdir/usr/share/zsh/site-functions" \
+            "$pkgdir/usr/share/fish/vendor_completions.d"
+        install -Dm644 completions/jiku.bash "$pkgdir/usr/share/bash-completion/completions/jiku"
+        install -Dm644 completions/jiku.zsh "$pkgdir/usr/share/zsh/site-functions/_jiku"
+        install -Dm644 completions/jiku.fish "$pkgdir/usr/share/fish/vendor_completions.d/jiku.fish"
+    fi
 }
