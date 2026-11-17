@@ -112,7 +112,7 @@ architectures = ["x86_64", "aarch64"]
 packaged_binaries = ["koma", "komactl", "koma-mcp", "koma-overview"]
 
 [development_prerelease]
-version = "0.0.1"
+version = "0.0.2"
 channel = "development"
 accepted = false
 publish_mode = "workflow_dispatch-with-release-environment"
