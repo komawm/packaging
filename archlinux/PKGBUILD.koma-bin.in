@@ -31,4 +31,15 @@ package() {
     install -Dm644 resources/greetd-config.toml "$pkgdir/usr/share/doc/koma/examples/greetd-config.toml"
     install -Dm644 examples/init.lua "$pkgdir/usr/share/doc/koma/examples/init.lua"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/koma/LICENSE"
+    if [[ -d completions ]]; then
+        install -d "$pkgdir/usr/share/bash-completion/completions" \
+            "$pkgdir/usr/share/zsh/site-functions" \
+            "$pkgdir/usr/share/fish/vendor_completions.d"
+        install -Dm644 completions/koma.bash "$pkgdir/usr/share/bash-completion/completions/koma"
+        install -Dm644 completions/koma.zsh "$pkgdir/usr/share/zsh/site-functions/_koma"
+        install -Dm644 completions/koma.fish "$pkgdir/usr/share/fish/vendor_completions.d/koma.fish"
+        install -Dm644 completions/komactl.bash "$pkgdir/usr/share/bash-completion/completions/komactl"
+        install -Dm644 completions/komactl.zsh "$pkgdir/usr/share/zsh/site-functions/_komactl"
+        install -Dm644 completions/komactl.fish "$pkgdir/usr/share/fish/vendor_completions.d/komactl.fish"
+    fi
 }

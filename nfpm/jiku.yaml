@@ -45,8 +45,23 @@ contents:
     expand: true
     file_info:
       mode: 0644
-  - src: ${PKG_SRC_ROOT}/skills/SKILL.md
-    dst: /usr/share/doc/jiku/skills/SKILL.md
+  - src: ${PKG_SRC_ROOT}/skills
+    dst: /usr/share/doc/jiku/skills
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/completions/jiku.bash
+    dst: /usr/share/bash-completion/completions/jiku
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/completions/jiku.zsh
+    dst: /usr/share/zsh/site-functions/_jiku
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/completions/jiku.fish
+    dst: /usr/share/fish/vendor_completions.d/jiku.fish
     expand: true
     file_info:
       mode: 0644

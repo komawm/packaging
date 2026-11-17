@@ -46,5 +46,14 @@ package() {
     # Example only: never overwrite a system greetd configuration from a package.
     install -Dm644 resources/greetd-config.toml "$pkgdir/usr/share/doc/koma/examples/greetd-config.toml"
     install -Dm644 examples/init.lua "$pkgdir/usr/share/doc/koma/examples/init.lua"
+    install -d "$pkgdir/usr/share/bash-completion/completions" \
+        "$pkgdir/usr/share/zsh/site-functions" \
+        "$pkgdir/usr/share/fish/vendor_completions.d"
+    ./target/release/koma completions bash > "$pkgdir/usr/share/bash-completion/completions/koma"
+    ./target/release/koma completions zsh > "$pkgdir/usr/share/zsh/site-functions/_koma"
+    ./target/release/koma completions fish > "$pkgdir/usr/share/fish/vendor_completions.d/koma.fish"
+    ./target/release/komactl completions bash > "$pkgdir/usr/share/bash-completion/completions/komactl"
+    ./target/release/komactl completions zsh > "$pkgdir/usr/share/zsh/site-functions/_komactl"
+    ./target/release/komactl completions fish > "$pkgdir/usr/share/fish/vendor_completions.d/komactl.fish"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/koma/LICENSE"
 }

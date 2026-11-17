@@ -75,6 +75,36 @@ contents:
     expand: true
     file_info:
       mode: 0644
+  - src: ${PKG_SRC_ROOT}/completions/koma.bash
+    dst: /usr/share/bash-completion/completions/koma
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/completions/koma.zsh
+    dst: /usr/share/zsh/site-functions/_koma
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/completions/koma.fish
+    dst: /usr/share/fish/vendor_completions.d/koma.fish
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/completions/komactl.bash
+    dst: /usr/share/bash-completion/completions/komactl
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/completions/komactl.zsh
+    dst: /usr/share/zsh/site-functions/_komactl
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/completions/komactl.fish
+    dst: /usr/share/fish/vendor_completions.d/komactl.fish
+    expand: true
+    file_info:
+      mode: 0644
   - src: ${PKG_SRC_ROOT}/LICENSE
     dst: /usr/share/licenses/koma/LICENSE
     expand: true
