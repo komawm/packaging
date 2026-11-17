@@ -800,6 +800,20 @@ jobs:
             npm publish "$dir" --access public --provenance --tag "$NPM_TAG"
           done < <(python3 -c 'import json,sys;print("\n".join(json.load(open(sys.argv[1]))["publish_order"]))' "$RUNNER_TEMP/npm-stage.json")
 
+      - name: Promote latest during the incubation line
+        if: ${{ inputs.channel == 'development' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # v0.0.x is the only published line, so `npm install -g @koma-wm/jiku`
+          # must resolve to the newest prerelease instead of the first one ever
+          # published. `latest` moves to `stable` semantics at v0.1.0.
+          while IFS= read -r dir; do
+            name="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["name"])' "$dir/package.json")"
+            npm dist-tag add "${name}@${VERSION}" latest
+          done < <(python3 -c 'import json,sys;print("\n".join(json.load(open(sys.argv[1]))["publish_order"]))' "$RUNNER_TEMP/npm-stage.json")
+
       - name: Report published packages
         run: |
           set -euo pipefail
