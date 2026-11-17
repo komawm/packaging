@@ -39,6 +39,9 @@ def build_fixture(base: Path) -> tuple[Path, Path]:
     (source / "skills" / "jiku-desktop-orchestration" / "LICENSE").write_text(
         MIT_HEADER, encoding="utf-8"
     )
+    (source / "skills" / "jiku-desktop-orchestration" / "SKILL.md").write_text(
+        "---\nname: jiku-desktop-orchestration\n---\n# fixture\n", encoding="utf-8"
+    )
 
     for nfpm_arch, rust_target in ARCHES.items():
         stage = base / f"stage-{nfpm_arch}" / f"jiku-{VERSION}-{rust_target}"
@@ -148,6 +151,18 @@ def main() -> int:
         if broken_skill.returncode == 0:
             raise SystemExit("stage_npm.py accepted a non-MIT skill license")
         shutil.rmtree(source / "skills")
+
+        # A skill directory without an entrypoint is a hard failure, not a warning.
+        skill_dir = source / "skills" / "jiku-desktop-orchestration"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "LICENSE").write_text(MIT_HEADER, encoding="utf-8")
+        missing_entry = stage(base / "noentry", artifacts, source)
+        if missing_entry.returncode == 0:
+            raise SystemExit("stage_npm.py accepted a skill directory without SKILL.md")
+        if "SKILL.md is missing" not in missing_entry.stderr:
+            raise SystemExit(
+                "stage_npm.py failed for the wrong reason: " + missing_entry.stderr.strip()
+            )
 
         # A corrupted archive must abort before any package is written.
         sums = artifacts / "SHA256SUMS-amd64"

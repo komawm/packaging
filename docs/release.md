@@ -59,7 +59,7 @@ prerelease is not acceptance: `accepted = false` and
 | Input | Meaning |
 | --- | --- |
 | `product` | Product repository under `komawm` (`koma` or `jiku`) |
-| `tag` | Existing product tag such as `v0.0.1`; must match `v0.MINOR.PATCH` |
+| `tag` | Existing product tag such as `v0.0.2`; must match `v0.MINOR.PATCH` |
 | `publish` | `false` (default) builds only; `true` also runs the `publish` job |
 
 The `build` job runs in a digest-pinned `archlinux:base-devel` container with
@@ -141,9 +141,10 @@ Design notes:
 - Each platform archive is verified against `SHA256SUMS-<arch>` before its
   binaries are extracted. A mismatch aborts the job.
 - The launcher bundles `skills/jiku-desktop-orchestration` only when the tagged
-  revision contains it. `v0.0.1` predates the skill catalog, so that package ships
-  no skill; a present-but-broken skill directory aborts the stage instead of shipping
-  half a skill, and the skill's MIT `LICENSE` is asserted to travel with it.
+  revision contains it. `v0.0.2` is the first tag that carries the catalog, so its
+  package ships the skill; `v0.0.1` predates it and ships none. A present-but-broken
+  skill directory aborts the stage instead of shipping half a skill, and the skill's
+  MIT `LICENSE` is asserted to travel with it.
 - `publishConfig.provenance` is enabled and the job publishes with
   `--provenance`. Because provenance binds to the workflow repository, the
   generated `repository` field points at `komawm/packaging` with
@@ -159,15 +160,15 @@ Verification after dispatch:
 
 ```bash
 npm view @koma-wm/jiku version dist-tags --registry https://registry.npmjs.org
-npm view @koma-wm/jiku@0.0.1 dependencies optionalDependencies
-npm pack @koma-wm/jiku-linux-x64@0.0.1 --pack-destination /tmp/koma/npm-verify
-tar -tzf /tmp/koma/npm-verify/koma-wm-jiku-linux-x64-0.0.1.tgz
+npm view @koma-wm/jiku@0.0.2 dependencies optionalDependencies
+npm pack @koma-wm/jiku-linux-x64@0.0.2 --pack-destination /tmp/koma/npm-verify
+tar -tzf /tmp/koma/npm-verify/koma-wm-jiku-linux-x64-0.0.2.tgz
 ```
 
 Local dry run without credentials (stage the trees, then pack them):
 
 ```bash
-just stage-npm 0.0.1 /tmp/koma/npm-artifacts /path/to/jiku-source /tmp/koma/npm-out
+just stage-npm 0.0.2 /tmp/koma/npm-artifacts /path/to/jiku-source /tmp/koma/npm-out
 just pack-npm /tmp/koma/npm-out
 ```
 
@@ -289,18 +290,60 @@ Releases, so the publish job needs a separate credential:
    Paste the value at the prompt; never write it to a file or shell history.
 4. Rotate it before expiry and revoke it immediately if exposed.
 
+### Release dispatch checklist
+
+`cd-release.yml` takes one boolean per destination. Nothing publishes unless
+`publish=true`, and each destination is independent, so a release is only complete
+when every intended input is set explicitly.
+
+| Input | Default | Set to `true` when |
+| --- | --- | --- |
+| `publish` | `false` | Always, for a real publication; it is the master gate |
+| `publish_r2` | `true` | Publishing immutable archives and the APT index to `https://cdn.komawm.org` |
+| `publish_github` | `true` | Attaching packages and checksums to the `komawm/<product>` release |
+| `publish_distros` | **`false`** | Updating AUR `koma-bin` / `jiku-bin`; Copr still needs `channel=stable`, and Cachix needs `flake.nix` upstream |
+| `publish_npm` | **`false`** | Publishing `@koma-wm/jiku` (Jiku only) |
+| `check_bsd` | `true` | Leave on for a full run; `false` skips the experimental BSD compile checks |
+
+Two constraints that have already caused a partial release:
+
+- `publish_distros` and `publish_npm` are **not** implied by `publish`. The `v0.0.2`
+  run used `publish_distros=false`, so AUR stayed at `0.0.1` until a second dispatch.
+- The `build-linux` job runs when `publish=false`, `publish_r2=true`,
+  `publish_github=true`, or `publish_npm=true`. A dispatch that only sets
+  `publish_distros` therefore produces no fresh artifacts, and the AUR step falls
+  back to reading `SHA256SUMS` from the CDN. Keep one build-triggering input true
+  when you also want a build.
+
+Complete dispatch for the current incubation line:
+
+```bash
+gh workflow run cd-release.yml --repo komawm/packaging \
+  -f product=jiku -f tag=v0.0.2 -f channel=development \
+  -f publish=true -f publish_r2=true -f publish_github=true \
+  -f publish_distros=true -f publish_npm=true -f check_bsd=false
+```
+
+AUR verification: the AUR RPC endpoint (`/rpc/v5/info`) can lag behind a push. Read
+the package page or clone the recipe instead:
+
+```bash
+git clone --depth 1 https://aur.archlinux.org/koma-bin.git /tmp/koma-bin
+grep ^pkgver /tmp/koma-bin/PKGBUILD
+```
+
 ### Dispatch and verification
 
 Build only (no credential needed):
 
 ```bash
-gh workflow run cd-archlinux.yml -f product=koma -f tag=v0.0.1 -f publish=false --repo komawm/packaging
+gh workflow run cd-archlinux.yml -f product=koma -f tag=v0.0.2 -f publish=false --repo komawm/packaging
 ```
 
-Build and publish to the existing Koma `v0.0.1` release:
+Build and publish to the existing Koma `v0.0.2` release:
 
 ```bash
-gh workflow run cd-archlinux.yml -f product=koma -f tag=v0.0.1 -f publish=true --repo komawm/packaging
+gh workflow run cd-archlinux.yml -f product=koma -f tag=v0.0.2 -f publish=true --repo komawm/packaging
 gh run list --workflow cd-archlinux.yml --repo komawm/packaging --limit 1
 gh run watch <run-id> --repo komawm/packaging
 ```
@@ -308,7 +351,7 @@ gh run watch <run-id> --repo komawm/packaging
 Publish Jiku to npm as well (Linux platform packages plus the launcher):
 
 ```bash
-gh workflow run cd-release.yml -f product=jiku -f tag=v0.0.1 -f channel=development \
+gh workflow run cd-release.yml -f product=jiku -f tag=v0.0.2 -f channel=development \
   -f publish=true -f publish_r2=true -f publish_github=true -f publish_npm=true \
   --repo komawm/packaging
 ```
@@ -316,13 +359,13 @@ gh workflow run cd-release.yml -f product=jiku -f tag=v0.0.1 -f channel=developm
 Approve the `release` deployment if reviewers are required. Then read back:
 
 ```bash
-gh release view v0.0.1 --repo komawm/koma --json assets --jq '.assets[].name'
-gh release download v0.0.1 --repo komawm/koma --pattern 'koma-*.pkg.tar.zst' \
+gh release view v0.0.2 --repo komawm/koma --json assets --jq '.assets[].name'
+gh release download v0.0.2 --repo komawm/koma --pattern 'koma-*.pkg.tar.zst' \
   --pattern SHA256SUMS-archlinux --pattern PACKAGE-MANIFEST-archlinux.toml --dir /tmp/koma/verify
 cd /tmp/koma/verify && sha256sum --check SHA256SUMS-archlinux
 ```
 
-Compare `commit` in the manifest with `git ls-remote https://github.com/komawm/koma refs/tags/v0.0.1^{}`
+Compare `commit` in the manifest with `git ls-remote https://github.com/komawm/koma refs/tags/v0.0.2^{}`
 (or the tag ref itself for lightweight tags). Installation of the package belongs
 in an isolated Arch VM, never on the host Hyprland session. A successful CD run
 is build evidence only; install/upgrade/rollback acceptance remains separate.
