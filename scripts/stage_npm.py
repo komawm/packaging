@@ -175,6 +175,11 @@ def stage_launcher(
     bundle_skill = skill_dir.is_dir()
     files = ["bin", "launch.js", "LICENSE", "README.md"]
     if bundle_skill:
+        skill_entry = skill_dir / "SKILL.md"
+        if not skill_entry.is_file():
+            # A directory without an entrypoint is not a skill; shipping it would put
+            # a `skills/` tree in the package that no agent can load.
+            fail(f"{skill_entry} is missing; a skill directory needs SKILL.md")
         skill_license = skill_dir / "LICENSE"
         if not skill_license.is_file() or not skill_license.read_text(
             encoding="utf-8"

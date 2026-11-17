@@ -59,7 +59,7 @@ prerelease is not acceptance: `accepted = false` and
 | Input | Meaning |
 | --- | --- |
 | `product` | Product repository under `komawm` (`koma` or `jiku`) |
-| `tag` | Existing product tag such as `v0.0.1`; must match `v0.MINOR.PATCH` |
+| `tag` | Existing product tag such as `v0.0.2`; must match `v0.MINOR.PATCH` |
 | `publish` | `false` (default) builds only; `true` also runs the `publish` job |
 
 The `build` job runs in a digest-pinned `archlinux:base-devel` container with
@@ -309,10 +309,11 @@ Two constraints that have already caused a partial release:
 
 - `publish_distros` and `publish_npm` are **not** implied by `publish`. The `v0.0.2`
   run used `publish_distros=false`, so AUR stayed at `0.0.1` until a second dispatch.
-- `build-linux` runs only when `publish=false`, `publish_r2=true`, or
-  `publish_github=true`. A distros-only dispatch therefore produces no fresh
-  artifacts, and the AUR step falls back to reading `SHA256SUMS` from the CDN. Keep
-  `publish_r2` or `publish_github` true when you also want a build.
+- The `build-linux` job runs when `publish=false`, `publish_r2=true`,
+  `publish_github=true`, or `publish_npm=true`. A dispatch that only sets
+  `publish_distros` therefore produces no fresh artifacts, and the AUR step falls
+  back to reading `SHA256SUMS` from the CDN. Keep one build-triggering input true
+  when you also want a build.
 
 Complete dispatch for the current incubation line:
 
@@ -358,13 +359,13 @@ gh workflow run cd-release.yml -f product=jiku -f tag=v0.0.2 -f channel=developm
 Approve the `release` deployment if reviewers are required. Then read back:
 
 ```bash
-gh release view v0.0.1 --repo komawm/koma --json assets --jq '.assets[].name'
-gh release download v0.0.1 --repo komawm/koma --pattern 'koma-*.pkg.tar.zst' \
+gh release view v0.0.2 --repo komawm/koma --json assets --jq '.assets[].name'
+gh release download v0.0.2 --repo komawm/koma --pattern 'koma-*.pkg.tar.zst' \
   --pattern SHA256SUMS-archlinux --pattern PACKAGE-MANIFEST-archlinux.toml --dir /tmp/koma/verify
 cd /tmp/koma/verify && sha256sum --check SHA256SUMS-archlinux
 ```
 
-Compare `commit` in the manifest with `git ls-remote https://github.com/komawm/koma refs/tags/v0.0.1^{}`
+Compare `commit` in the manifest with `git ls-remote https://github.com/komawm/koma refs/tags/v0.0.2^{}`
 (or the tag ref itself for lightweight tags). Installation of the package belongs
 in an isolated Arch VM, never on the host Hyprland session. A successful CD run
 is build evidence only; install/upgrade/rollback acceptance remains separate.
