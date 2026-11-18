@@ -617,6 +617,17 @@ jobs:
             exit 1
           fi
           export GH_TOKEN="$token"
+          # The release itself is not created anywhere else in the release flow: v0.0.1 and v0.0.2
+          # had theirs made by hand, which is why v0.0.3 failed with `release not found` after the
+          # archives were already on R2. Create it here so a tag-only release is self-sufficient,
+          # and leave an existing release untouched (its human-authored notes win).
+          if ! gh release view "$TAG" --repo "komawm/$PRODUCT" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "komawm/$PRODUCT" \
+              --title "${PRODUCT} ${VERSION}" \
+              --notes "${PRODUCT} ${VERSION} — see https://github.com/komawm/${PRODUCT}/blob/${TAG}/CHANGELOG.md for the full list of changes." \
+              --verify-tag
+          fi
           cp release-bundle/SHA256SUMS "release-bundle/SHA256SUMS-linux-packages"
           shopt -s nullglob
           mapfile -t gh_assets < <(
