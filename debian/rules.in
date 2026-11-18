@@ -13,14 +13,13 @@ override_dh_auto_configure:
 
 override_dh_auto_build:
 	cargo build --release --locked --package koma --package komactl \
-		--package koma-mcp --package koma-overview
+		--package koma-overview
 
 override_dh_auto_test:
 
 override_dh_auto_install:
 	install -Dm755 target/release/koma debian/koma/usr/bin/koma
 	install -Dm755 target/release/komactl debian/koma/usr/bin/komactl
-	install -Dm755 target/release/koma-mcp debian/koma/usr/bin/koma-mcp
 	install -Dm755 target/release/koma-overview debian/koma/usr/bin/koma-overview
 	install -Dm755 resources/koma-session debian/koma/usr/bin/koma-session
 	install -Dm644 resources/koma.desktop debian/koma/usr/share/wayland-sessions/koma.desktop

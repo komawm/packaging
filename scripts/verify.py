@@ -21,7 +21,10 @@ from render_template import DISTRO_TEMPLATES, render_distro
 ALLOWED_PLACEHOLDERS = {"@VERSION@", "@SOURCE_COMMIT@", "@SOURCE_SHA256@"}
 DUMMY_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 DUMMY_SHA256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-EXPECTED_BINARIES = ["koma", "komactl", "koma-mcp", "koma-overview"]
+EXPECTED_BINARIES = ["koma", "komactl", "koma-overview"]
+# `koma-mcp` was folded into the `koma mcp` subcommand; a leftover standalone
+# binary entry in any template, plist, or nFPM spec must fail loudly.
+REMOVED_BINARIES = ("koma-mcp",)
 
 SECRET_PATTERNS = (
     re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}"),
@@ -312,6 +315,12 @@ def verify_all_distro_templates(root: Path, config: dict) -> None:
                     f"{distro} templates must bind {sorted(ALLOWED_PLACEHOLDERS)}, found {sorted(seen_placeholders)}"
                 )
             combined_text = "\n".join(combined_parts)
+            for removed in REMOVED_BINARIES:
+                if removed in combined_text:
+                    raise SystemExit(
+                        f"{distro} templates must not package the removed standalone "
+                        f"{removed} binary; it is now the `koma mcp` subcommand"
+                    )
             if "--locked" not in combined_text:
                 raise SystemExit(f"{distro} templates must use --locked Cargo dependencies")
             needles, message = license_checks[distro]
@@ -537,6 +546,12 @@ def verify_nfpm_specs(root: Path, config: dict) -> None:
         expected_license_dst = f"/usr/share/licenses/{product}/LICENSE"
         if expected_license_dst not in dsts:
             raise SystemExit(f"nFPM config {rel} must install {expected_license_dst}")
+        for removed in REMOVED_BINARIES:
+            if any(dst.endswith(f"/{removed}") for dst in dsts):
+                raise SystemExit(
+                    f"nFPM config {rel} must not install the removed standalone "
+                    f"{removed} binary; it is now the `koma mcp` subcommand"
+                )
 
 
 def verify_dependabot(root: Path) -> None:
@@ -574,13 +589,13 @@ def validate_rendered_distro(distro: str, dest: Path) -> None:
     elif distro == "freebsd":
         verify_make_recipes(dest / "Makefile", ("do-install:",))
         plist = (dest / "pkg-plist").read_text(encoding="utf-8")
-        for binary in ("bin/koma", "bin/komactl", "bin/koma-mcp", "bin/koma-overview"):
+        for binary in ("bin/koma", "bin/komactl", "bin/koma-overview"):
             if binary not in plist:
                 raise SystemExit(f"freebsd/pkg-plist missing {binary}")
     elif distro == "openbsd":
         verify_make_recipes(dest / "Makefile", ("do-build:", "do-install:"))
         plist = (dest / "pkg/PLIST").read_text(encoding="utf-8")
-        for binary in ("bin/koma", "bin/komactl", "bin/koma-mcp", "bin/koma-overview", "bin/koma-session"):
+        for binary in ("bin/koma", "bin/komactl", "bin/koma-overview", "bin/koma-session"):
             if binary not in plist:
                 raise SystemExit(f"openbsd/pkg/PLIST missing {binary}")
     elif distro == "nix":

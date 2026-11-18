@@ -210,3 +210,8 @@ Follow-up verification tested the unreleased `KOM-0011` fix series (`carryctx/ko
 | `SIGTERM` shutdown | Pass | `koma exited rc=0` cleanly on `virtio-vga` (`seatd`/`logind`) and `VGA` (`seatd`) |
 
 Boundary unchanged: software KMS (`llvmpipe`) in QEMU establishes compositor protocol, client mapping, IPC frame capture, CLI flag handling, and signal shutdown on emulated display devices; it still does not prove physical GPU DRM/KMS scanout or Virgl 3D hardware acceleration.
+
+Both VM runs above predate the upstream removal of the standalone `koma-mcp`
+binary: those packages shipped `koma-mcp --print-tools`, which is now the
+`koma mcp --print-tools` subcommand. The result rows record what each build
+actually executed.

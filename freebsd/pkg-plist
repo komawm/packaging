@@ -1,6 +1,5 @@
 bin/koma
 bin/komactl
-bin/koma-mcp
 bin/koma-overview
 bin/koma-session
 share/wayland-sessions/koma.desktop

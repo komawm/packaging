@@ -33,13 +33,12 @@ USES=		cargo gl pkgconfig
 USE_GL=		egl gbm glesv2
 
 # Expected archive SHA-256 verified via distinfo: @SOURCE_SHA256@
-CARGO_BUILD_ARGS=	--locked -p koma -p komactl -p koma-mcp -p koma-overview
+CARGO_BUILD_ARGS=	--locked -p koma -p komactl -p koma-overview
 
 do-install:
 	@${MKDIR} ${STAGEDIR}${PREFIX}/bin
 	${INSTALL_PROGRAM} ${CARGO_TARGET_DIR}/release/koma ${STAGEDIR}${PREFIX}/bin/koma
 	${INSTALL_PROGRAM} ${CARGO_TARGET_DIR}/release/komactl ${STAGEDIR}${PREFIX}/bin/komactl
-	${INSTALL_PROGRAM} ${CARGO_TARGET_DIR}/release/koma-mcp ${STAGEDIR}${PREFIX}/bin/koma-mcp
 	${INSTALL_PROGRAM} ${CARGO_TARGET_DIR}/release/koma-overview ${STAGEDIR}${PREFIX}/bin/koma-overview
 	${INSTALL_SCRIPT} ${WRKSRC}/resources/koma-session ${STAGEDIR}${PREFIX}/bin/koma-session
 	@${MKDIR} ${STAGEDIR}${PREFIX}/share/wayland-sessions

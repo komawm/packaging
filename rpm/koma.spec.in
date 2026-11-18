@@ -38,8 +38,8 @@ Suggests:       greetd
 
 %description
 Koma is a Wayland tiling compositor built in Rust with explicit desktop
-automation and IPC interfaces, shipping koma, komactl, koma-mcp, and
-koma-overview.
+automation and IPC interfaces, shipping koma, komactl, and koma-overview.
+MCP tooling is available via the `koma mcp` subcommand.
 
 %prep
 echo "@SOURCE_SHA256@  %{SOURCE0}" | sha256sum -c -
@@ -56,12 +56,11 @@ elif command -v rustup >/dev/null 2>&1; then
     rustup toolchain install --profile minimal "$channel"
 fi
 cargo build --release --locked --package koma --package komactl \
-    --package koma-mcp --package koma-overview
+    --package koma-overview
 
 %install
 install -Dm755 target/release/koma %{buildroot}%{_bindir}/koma
 install -Dm755 target/release/komactl %{buildroot}%{_bindir}/komactl
-install -Dm755 target/release/koma-mcp %{buildroot}%{_bindir}/koma-mcp
 install -Dm755 target/release/koma-overview %{buildroot}%{_bindir}/koma-overview
 install -Dm755 resources/koma-session %{buildroot}%{_bindir}/koma-session
 install -Dm644 resources/koma.desktop %{buildroot}%{_datadir}/wayland-sessions/koma.desktop
@@ -77,7 +76,6 @@ install -Dm644 examples/init.lua %{buildroot}%{_pkgdocdir}/examples/init.lua
 %doc %{_pkgdocdir}/examples/init.lua
 %{_bindir}/koma
 %{_bindir}/komactl
-%{_bindir}/koma-mcp
 %{_bindir}/koma-overview
 %{_bindir}/koma-session
 %{_datadir}/wayland-sessions/koma.desktop

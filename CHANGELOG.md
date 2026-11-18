@@ -53,6 +53,13 @@ versions follow the Koma `v0.0.x` development series until `v0.1.0` acceptance.
   `vm/*.sh` in `just check`, and [VM testing](docs/vm-testing.md) documentation
   with the `v0.0.1` VM results.
 
+### Changed
+
+- Removed the standalone `koma-mcp` binary from every template, package,
+  archive, plist, and workflow; upstream folded it into the `koma mcp`
+  subcommand. `scripts/verify.py` now fails if a stale `koma-mcp` entry
+  reappears in a template, nFPM spec, or BSD plist.
+
 ### Fixed
 
 - Rewrote `scripts/verify.py` to validate YAML workflows, `nfpm/*.yaml`,

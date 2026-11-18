@@ -30,11 +30,6 @@ contents:
     expand: true
     file_info:
       mode: 0755
-  - src: ${PKG_SRC_ROOT}/target/release/koma-mcp
-    dst: /usr/bin/koma-mcp
-    expand: true
-    file_info:
-      mode: 0755
   - src: ${PKG_SRC_ROOT}/target/release/koma-overview
     dst: /usr/bin/koma-overview
     expand: true

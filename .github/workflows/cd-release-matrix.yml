@@ -578,13 +578,12 @@ jobs:
             cd "$src_dir"
             test -f Cargo.lock
             cargo build --release --locked --package koma --package komactl \
-              --package koma-mcp --package koma-overview
+              --package koma-overview
           )
           mkdir -p "$stage_root/bin" "$stage_root/share/wayland-sessions" "$stage_root/share/xdg-desktop-portal" \
             "$stage_root/share/doc/koma/examples" "$stage_root/share/licenses/koma"
           install -m 755 "$CARGO_TARGET_DIR/release/koma" "$stage_root/bin/koma"
           install -m 755 "$CARGO_TARGET_DIR/release/komactl" "$stage_root/bin/komactl"
-          install -m 755 "$CARGO_TARGET_DIR/release/koma-mcp" "$stage_root/bin/koma-mcp"
           install -m 755 "$CARGO_TARGET_DIR/release/koma-overview" "$stage_root/bin/koma-overview"
           install -m 755 "$src_dir/resources/koma-session" "$stage_root/bin/koma-session"
           install -m 644 "$src_dir/resources/koma.desktop" "$stage_root/share/wayland-sessions/koma.desktop"
@@ -751,7 +750,7 @@ jobs:
               extra_flags="--ignore-rust-version"
             fi
             # shellcheck disable=SC2086
-            cargo build --release --locked $extra_flags -p koma-proto -p komactl -p koma-mcp
+            cargo build --release --locked $extra_flags -p koma-proto -p komactl
             if pkg-config --exists wayland-client 2>/dev/null; then
               # shellcheck disable=SC2086
               cargo build --release --locked $extra_flags -p koma-overview
@@ -769,7 +768,6 @@ jobs:
             "$stage_root/share/xdg-desktop-portal" "$stage_root/share/doc/koma/examples" \
             "$stage_root/share/doc/koma/openbsd-port/pkg" "$stage_root/share/licenses/koma"
           install -m 755 "$CARGO_TARGET_DIR/release/komactl" "$stage_root/bin/komactl"
-          install -m 755 "$CARGO_TARGET_DIR/release/koma-mcp" "$stage_root/bin/koma-mcp"
           install -m 755 "$CARGO_TARGET_DIR/release/koma-overview" "$stage_root/bin/koma-overview"
           if [ -x "$CARGO_TARGET_DIR/release/koma" ]; then
             install -m 755 "$CARGO_TARGET_DIR/release/koma" "$stage_root/bin/koma"

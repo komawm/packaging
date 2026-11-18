@@ -19,7 +19,7 @@ Steps:
   verify     sha256sum -c on the copied artifacts
   install    pacman -U the package (records resolved dependencies), pacman -Ql
   namcap     namcap on the package file
-  cli        --headless-check, komactl validate/gen-types, koma-mcp --print-tools
+  cli        --headless-check, komactl validate/gen-types, koma mcp --print-tools
   tty        Launch `koma --tty` in tester's autologin session on tty1 (logind),
              probe Wayland globals, spawn foot, IPC, protocol checks, screendumps
   protocols  Run Wayland protocol completeness checks (foot log, grim/wlr-screencopy,
@@ -126,7 +126,7 @@ step_cli() {
         komactl validate /usr/share/doc/koma/examples/init.lua
         echo '\$ komactl gen-types | head -n 20'; komactl gen-types | head -n 20
         echo '\$ komactl gen-types | wc -l'; komactl gen-types | wc -l
-        echo '\$ koma-mcp --print-tools | head -c 2000'; koma-mcp --print-tools | head -c 2000; echo
+        echo '\$ koma mcp --print-tools | head -c 2000'; koma mcp --print-tools | head -c 2000; echo
         echo '\$ komactl --help | head -n 5'; komactl --help | head -n 5
         echo '\$ komactl --version'; komactl --version
         echo '\$ komactl (no args, usage, expected rc=2)'; rc=0; komactl >/dev/null 2>&1 || rc=\$?; echo \"rc=\$rc\"; test \"\$rc\" -eq 2

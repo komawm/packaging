@@ -32,7 +32,6 @@ class Koma < Formula
   def install
     bin.install "bin/koma"
     bin.install "bin/komactl"
-    bin.install "bin/koma-mcp"
     bin.install "bin/koma-overview"
     bin.install "resources/koma-session"
     (share/"wayland-sessions").install "resources/koma.desktop"
@@ -46,6 +45,6 @@ class Koma < Formula
   test do
     assert_match "koma", shell_output("#{bin}/koma --version")
     assert_match "komactl", shell_output("#{bin}/komactl --version")
-    assert_match "name", shell_output("#{bin}/koma-mcp --print-tools")
+    assert_match "name", shell_output("#{bin}/koma mcp --print-tools")
   end
 end

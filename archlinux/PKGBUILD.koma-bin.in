@@ -21,7 +21,6 @@ package() {
     cd "koma-${pkgver}-${CARCH}-unknown-linux-gnu" || return 1
     install -Dm755 bin/koma "$pkgdir/usr/bin/koma"
     install -Dm755 bin/komactl "$pkgdir/usr/bin/komactl"
-    install -Dm755 bin/koma-mcp "$pkgdir/usr/bin/koma-mcp"
     install -Dm755 bin/koma-overview "$pkgdir/usr/bin/koma-overview"
     install -Dm755 resources/koma-session "$pkgdir/usr/bin/koma-session"
     install -Dm644 resources/koma.desktop "$pkgdir/usr/share/wayland-sessions/koma.desktop"

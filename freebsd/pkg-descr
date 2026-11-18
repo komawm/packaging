@@ -1,5 +1,5 @@
 Koma is a Wayland tiling compositor built in Rust with explicit desktop
-automation and IPC interfaces, shipping koma, komactl, koma-mcp, and
-koma-overview.
+automation and IPC interfaces, shipping koma, komactl, and koma-overview.
+MCP tooling is available via the `koma mcp` subcommand.
 
 WWW: https://github.com/komawm/koma

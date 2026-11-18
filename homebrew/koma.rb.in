@@ -31,12 +31,10 @@ class Koma < Formula
     system "cargo", "build", "--release", "--locked",
            "--package", "koma",
            "--package", "komactl",
-           "--package", "koma-mcp",
            "--package", "koma-overview"
 
     bin.install "target/release/koma"
     bin.install "target/release/komactl"
-    bin.install "target/release/koma-mcp"
     bin.install "target/release/koma-overview"
     bin.install "resources/koma-session"
     (share/"wayland-sessions").install "resources/koma.desktop"
@@ -50,6 +48,6 @@ class Koma < Formula
   test do
     assert_match "koma", shell_output("#{bin}/koma --version")
     assert_match "komactl", shell_output("#{bin}/komactl --version")
-    assert_match "name", shell_output("#{bin}/koma-mcp --print-tools")
+    assert_match "name", shell_output("#{bin}/koma mcp --print-tools")
   end
 end
