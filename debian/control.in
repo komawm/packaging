@@ -40,5 +40,5 @@ Suggests:
  xwayland-satellite
 Description: Wayland tiling compositor with explicit desktop automation interfaces
  Koma (@VERSION@) is a Wayland tiling compositor built in Rust with explicit
- desktop automation and IPC interfaces, shipping koma, komactl, koma-mcp,
- and koma-overview.
+ desktop automation and IPC interfaces, shipping koma, komactl, and
+ koma-overview. MCP tooling is available via the `koma mcp` subcommand.

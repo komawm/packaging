@@ -258,10 +258,10 @@ jobs:
           pushd "$src_root" >/dev/null
           if [[ "$PRODUCT" == "koma" ]]; then
             cargo build --release --locked \
-              -p koma -p komactl -p koma-mcp -p koma-overview
+              -p koma -p komactl -p koma-overview
             ./target/release/koma --headless-check
             ./target/release/komactl validate examples/init.lua
-            bins=(koma komactl koma-mcp koma-overview)
+            bins=(koma komactl koma-overview)
           else
             cargo build --release --locked -p jikud -p jiku
             ./target/release/jikud --headless-check

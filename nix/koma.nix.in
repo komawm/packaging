@@ -37,8 +37,6 @@ rustPlatform.buildRustPackage {
     "-p"
     "komactl"
     "-p"
-    "koma-mcp"
-    "-p"
     "koma-overview"
   ];
 

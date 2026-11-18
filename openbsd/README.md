@@ -8,9 +8,9 @@ provides `Makefile.in`, `distinfo.in`, `pkg/DESCR`, and `pkg/PLIST` targeting
 
 OpenBSD packaging and runtime behavior are **unverified and experimental**
 (`accepted = false`, `runtime_verified = false`). The pure-Rust control,
-protocol, MCP, and overview crates (`koma-proto`, `komactl`, `koma-mcp`,
-`koma-overview`) are portable, whereas the full `koma` compositor depends on
-OpenBSD Wayland/DRM/KMS and compatibility shims (`sysutils/seatd`,
+protocol, and overview crates (`koma-proto`, `komactl`, `koma-overview`) are
+portable, whereas the full `koma` compositor depends on OpenBSD
+Wayland/DRM/KMS and compatibility shims (`sysutils/seatd`,
 `sysutils/libudev-openbsd`, `wayland/libinput-openbsd`).
 
 Linux systemd user units (`koma.service`, `koma-shutdown.target`) are omitted;

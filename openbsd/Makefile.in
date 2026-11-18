@@ -33,7 +33,7 @@ LIB_DEPENDS =	sysutils/libudev-openbsd \
 		x11/xkbcommon
 
 # Expected archive SHA-256 verified via distinfo: @SOURCE_SHA256@
-MODCARGO_BUILD_ARGS =	--locked -p koma -p komactl -p koma-mcp -p koma-overview
+MODCARGO_BUILD_ARGS =	--locked -p koma -p komactl -p koma-overview
 
 do-build:
 	cd ${WRKSRC} && cargo build --release ${MODCARGO_BUILD_ARGS}
@@ -41,7 +41,6 @@ do-build:
 do-install:
 	${INSTALL_PROGRAM} ${WRKSRC}/target/release/koma ${PREFIX}/bin/koma
 	${INSTALL_PROGRAM} ${WRKSRC}/target/release/komactl ${PREFIX}/bin/komactl
-	${INSTALL_PROGRAM} ${WRKSRC}/target/release/koma-mcp ${PREFIX}/bin/koma-mcp
 	${INSTALL_PROGRAM} ${WRKSRC}/target/release/koma-overview ${PREFIX}/bin/koma-overview
 	${INSTALL_SCRIPT} ${WRKSRC}/resources/koma-session ${PREFIX}/bin/koma-session
 	${INSTALL_DATA_DIR} ${PREFIX}/share/wayland-sessions

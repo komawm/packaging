@@ -54,6 +54,17 @@ prerelease is not acceptance: `accepted = false` and
 `first_accepted_version = "0.1.0"` stay in
 [packaging.toml](https://github.com/komawm/packaging/blob/main/packaging.toml).
 
+### Packaged binaries
+
+Koma packages and release archives install exactly `koma`, `komactl`, and
+`koma-overview`, plus the `koma-session` launcher where a distribution already
+installs it. No archive ships a standalone MCP executable.
+
+Migration: `koma-mcp` is now `koma mcp`. Flags are unchanged, including
+`koma mcp --print-tools` (offline tool-schema dump) and
+`koma mcp --auto-mint-admin`, so replace `koma-mcp <flags>` with
+`koma mcp <flags>` in scripts and MCP client command lines.
+
 ### Arch Linux workflow (`cd-archlinux.yml`)
 
 | Input | Meaning |
@@ -219,8 +230,8 @@ The `prepare` job resolves `tag` to an immutable 40-character commit via
   `8.0` `amd64` VM, opt-in via `channel=all` or `channel=openbsd`): renders the
   OpenBSD port templates inside the OpenBSD guest, verifies the source checksum
   and `Cargo.lock`, builds portable workspace crates (`koma-proto`, `komactl`,
-  `koma-mcp`, `koma-overview`, plus `koma` when all OpenBSD Wayland/seat ports
-  build), and packages an experimental tarball with `SHA256SUMS-openbsd-amd64`.
+  `koma-overview`, plus `koma` when all OpenBSD Wayland/seat ports build), and
+  packages an experimental tarball with `SHA256SUMS-openbsd-amd64`.
   OpenBSD runtime behavior remains unverified/experimental
   (`runtime_verified = false`).
 

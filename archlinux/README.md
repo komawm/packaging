@@ -7,8 +7,9 @@ PKGBUILD until an immutable source commit and the real downloaded archive's
 SHA-256 are supplied. A renderer can produce a local review candidate, but
 neither rendering nor shell validation establishes a successful package.
 
-The template builds the Koma compositor, controller, MCP adapter, and overview
-from a pinned source archive with a committed Cargo.lock. It does not include
+The template builds the Koma compositor (including the `koma mcp` adapter),
+controller, and overview from a pinned source archive with a committed
+Cargo.lock. It does not include
 Jiku's unimplemented daemon. Product source, binaries, configuration examples,
 and license notices must retain their product license; this repository's MIT
 license applies to packaging infrastructure.
