@@ -11,6 +11,7 @@ URL:            https://github.com/komawm/koma
 ExclusiveArch:  x86_64 aarch64
 Source0:        https://github.com/komawm/koma/archive/%{source_commit}.tar.gz#/koma-%{source_commit}.tar.gz
 
+BuildRequires:  clang-devel
 BuildRequires:  dbus-devel
 BuildRequires:  fontconfig-devel
 BuildRequires:  libinput-devel
@@ -18,6 +19,7 @@ BuildRequires:  libseat-devel
 BuildRequires:  libxkbcommon-devel
 BuildRequires:  mesa-libEGL-devel
 BuildRequires:  mesa-libgbm-devel
+BuildRequires:  pipewire-devel
 BuildRequires:  pkgconf-pkg-config
 BuildRequires:  rustup
 BuildRequires:  systemd-devel
@@ -30,6 +32,7 @@ Requires:       libwayland-server
 Requires:       libxkbcommon
 Requires:       mesa-libEGL
 Requires:       mesa-libgbm
+Requires:       pipewire-libs
 Requires:       seatd-libs
 Requires:       systemd-libs
 
@@ -56,17 +59,21 @@ elif command -v rustup >/dev/null 2>&1; then
     rustup toolchain install --profile minimal "$channel"
 fi
 cargo build --release --locked --package koma --package komactl \
-    --package koma-overview
+    --package koma-overview --package koma-portal
 
 %install
 install -Dm755 target/release/koma %{buildroot}%{_bindir}/koma
 install -Dm755 target/release/komactl %{buildroot}%{_bindir}/komactl
 install -Dm755 target/release/koma-overview %{buildroot}%{_bindir}/koma-overview
+install -Dm755 target/release/xdg-desktop-portal-koma %{buildroot}%{_bindir}/xdg-desktop-portal-koma
 install -Dm755 resources/koma-session %{buildroot}%{_bindir}/koma-session
 install -Dm644 resources/koma.desktop %{buildroot}%{_datadir}/wayland-sessions/koma.desktop
 install -Dm644 resources/koma.service %{buildroot}%{_userunitdir}/koma.service
 install -Dm644 resources/koma-shutdown.target %{buildroot}%{_userunitdir}/koma-shutdown.target
 install -Dm644 resources/koma-portals.conf %{buildroot}%{_datadir}/xdg-desktop-portal/koma-portals.conf
+install -Dm644 resources/koma.portal %{buildroot}%{_datadir}/xdg-desktop-portal/portals/koma.portal
+install -Dm644 resources/org.freedesktop.impl.portal.desktop.koma.service %{buildroot}%{_datadir}/dbus-1/services/org.freedesktop.impl.portal.desktop.koma.service
+install -Dm644 resources/xdg-desktop-portal-koma.service %{buildroot}%{_userunitdir}/xdg-desktop-portal-koma.service
 install -Dm644 resources/greetd-config.toml %{buildroot}%{_pkgdocdir}/examples/greetd-config.toml
 install -Dm644 examples/init.lua %{buildroot}%{_pkgdocdir}/examples/init.lua
 
@@ -77,11 +84,15 @@ install -Dm644 examples/init.lua %{buildroot}%{_pkgdocdir}/examples/init.lua
 %{_bindir}/koma
 %{_bindir}/komactl
 %{_bindir}/koma-overview
+%{_bindir}/xdg-desktop-portal-koma
 %{_bindir}/koma-session
 %{_datadir}/wayland-sessions/koma.desktop
 %{_userunitdir}/koma.service
 %{_userunitdir}/koma-shutdown.target
 %{_datadir}/xdg-desktop-portal/koma-portals.conf
+%{_datadir}/xdg-desktop-portal/portals/koma.portal
+%{_datadir}/dbus-1/services/org.freedesktop.impl.portal.desktop.koma.service
+%{_userunitdir}/xdg-desktop-portal-koma.service
 
 %changelog
 * Sat Nov 14 2026 Koma Packaging <packaging@komawm.org> - @VERSION@-1

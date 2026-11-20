@@ -16,7 +16,7 @@ esac
 dnf install -y --setopt=install_weak_deps=False \
     rpm-build rustup pkgconf-pkg-config systemd-devel libinput-devel \
     libseat-devel mesa-libgbm-devel mesa-libEGL-devel wayland-devel \
-    libxkbcommon-devel dbus-devel fontconfig-devel \
+    libxkbcommon-devel dbus-devel fontconfig-devel pipewire-devel clang-devel \
     tar gzip shadow-utils findutils sed
 
 useradd --create-home --shell /bin/bash builder

@@ -35,6 +35,11 @@ contents:
     expand: true
     file_info:
       mode: 0755
+  - src: ${PKG_SRC_ROOT}/target/release/xdg-desktop-portal-koma
+    dst: /usr/bin/xdg-desktop-portal-koma
+    expand: true
+    file_info:
+      mode: 0755
   - src: ${PKG_SRC_ROOT}/resources/koma-session
     dst: /usr/bin/koma-session
     expand: true
@@ -57,6 +62,21 @@ contents:
       mode: 0644
   - src: ${PKG_SRC_ROOT}/resources/koma-portals.conf
     dst: /usr/share/xdg-desktop-portal/koma-portals.conf
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/resources/koma.portal
+    dst: /usr/share/xdg-desktop-portal/portals/koma.portal
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/resources/org.freedesktop.impl.portal.desktop.koma.service
+    dst: /usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.koma.service
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${PKG_SRC_ROOT}/resources/xdg-desktop-portal-koma.service
+    dst: /usr/lib/systemd/user/xdg-desktop-portal-koma.service
     expand: true
     file_info:
       mode: 0644
@@ -122,6 +142,7 @@ overrides:
       - libwayland-server0
       - libxkbcommon0
       - libdisplay-info2 | libdisplay-info1
+      - libpipewire-0.3-0t64 | libpipewire-0.3-0
     recommends:
       - xwayland-satellite
       - xdg-desktop-portal-gnome
@@ -143,6 +164,7 @@ overrides:
       - wayland-libs-server
       - libxkbcommon
       - libdisplay-info
+      - pipewire-libs
     recommends:
       - xwayland-satellite
       - xdg-desktop-portal-gnome
@@ -164,6 +186,7 @@ overrides:
       - wayland-libs-server
       - libxkbcommon
       - libdisplay-info
+      - pipewire-libs
 
 deb:
   compression: zstd

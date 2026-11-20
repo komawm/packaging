@@ -7,7 +7,7 @@ pkgdesc='Wayland tiling compositor with explicit desktop automation interfaces (
 arch=('x86_64' 'aarch64')
 url='https://komawm.org'
 license=('GPL-3.0-or-later')
-depends=('gcc-libs' 'glibc' 'libdrm' 'libinput' 'libxkbcommon' 'mesa' 'seatd' 'systemd-libs' 'libglvnd' 'wayland')
+depends=('gcc-libs' 'glibc' 'libdrm' 'libinput' 'libxkbcommon' 'mesa' 'pipewire' 'seatd' 'systemd-libs' 'libglvnd' 'wayland')
 optdepends=('xwayland-satellite: X11 client support' 'xdg-desktop-portal-gnome: screencast and file portals' 'polkit: VT switching under systemd-logind without seatd' 'jiku: optional desktop orchestration companion daemon')
 provides=('koma')
 conflicts=('koma')
@@ -22,11 +22,15 @@ package() {
     install -Dm755 bin/koma "$pkgdir/usr/bin/koma"
     install -Dm755 bin/komactl "$pkgdir/usr/bin/komactl"
     install -Dm755 bin/koma-overview "$pkgdir/usr/bin/koma-overview"
+    install -Dm755 bin/xdg-desktop-portal-koma "$pkgdir/usr/bin/xdg-desktop-portal-koma"
     install -Dm755 resources/koma-session "$pkgdir/usr/bin/koma-session"
     install -Dm644 resources/koma.desktop "$pkgdir/usr/share/wayland-sessions/koma.desktop"
     install -Dm644 resources/koma.service "$pkgdir/usr/lib/systemd/user/koma.service"
     install -Dm644 resources/koma-shutdown.target "$pkgdir/usr/lib/systemd/user/koma-shutdown.target"
     install -Dm644 resources/koma-portals.conf "$pkgdir/usr/share/xdg-desktop-portal/koma-portals.conf"
+    install -Dm644 resources/koma.portal "$pkgdir/usr/share/xdg-desktop-portal/portals/koma.portal"
+    install -Dm644 resources/org.freedesktop.impl.portal.desktop.koma.service "$pkgdir/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.koma.service"
+    install -Dm644 resources/xdg-desktop-portal-koma.service "$pkgdir/usr/lib/systemd/user/xdg-desktop-portal-koma.service"
     install -Dm644 resources/greetd-config.toml "$pkgdir/usr/share/doc/koma/examples/greetd-config.toml"
     install -Dm644 examples/init.lua "$pkgdir/usr/share/doc/koma/examples/init.lua"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/koma/LICENSE"

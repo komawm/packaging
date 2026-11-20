@@ -206,7 +206,8 @@ jobs:
             sudo apt-get install --no-install-recommends -y \
               pkg-config zstd libudev-dev libinput-dev libseat-dev libgbm-dev \
               libegl1-mesa-dev libgles2-mesa-dev libwayland-dev libxkbcommon-dev \
-              libdbus-1-dev libfontconfig1-dev libdisplay-info-dev
+              libdbus-1-dev libfontconfig1-dev libdisplay-info-dev \
+              libpipewire-0.3-dev libclang-dev
           else
             sudo apt-get install --no-install-recommends -y pkg-config zstd
           fi
@@ -258,10 +259,10 @@ jobs:
           pushd "$src_root" >/dev/null
           if [[ "$PRODUCT" == "koma" ]]; then
             cargo build --release --locked \
-              -p koma -p komactl -p koma-overview
+              -p koma -p komactl -p koma-overview -p koma-portal
             ./target/release/koma --headless-check
             ./target/release/komactl validate examples/init.lua
-            bins=(koma komactl koma-overview)
+            bins=(koma komactl koma-overview xdg-desktop-portal-koma)
           else
             cargo build --release --locked -p jikud -p jiku
             ./target/release/jikud --headless-check

@@ -39,6 +39,7 @@ AUR_BIN_SPECS: dict[str, AurBinSpec] = {
             "libinput",
             "libxkbcommon",
             "mesa",
+            "pipewire",
             "seatd",
             "systemd-libs",
             "libglvnd",

@@ -13,7 +13,7 @@ override_dh_auto_configure:
 
 override_dh_auto_build:
 	cargo build --release --locked --package koma --package komactl \
-		--package koma-overview
+		--package koma-overview --package koma-portal
 
 override_dh_auto_test:
 
@@ -21,11 +21,15 @@ override_dh_auto_install:
 	install -Dm755 target/release/koma debian/koma/usr/bin/koma
 	install -Dm755 target/release/komactl debian/koma/usr/bin/komactl
 	install -Dm755 target/release/koma-overview debian/koma/usr/bin/koma-overview
+	install -Dm755 target/release/xdg-desktop-portal-koma debian/koma/usr/bin/xdg-desktop-portal-koma
 	install -Dm755 resources/koma-session debian/koma/usr/bin/koma-session
 	install -Dm644 resources/koma.desktop debian/koma/usr/share/wayland-sessions/koma.desktop
 	install -Dm644 resources/koma.service debian/koma/usr/lib/systemd/user/koma.service
 	install -Dm644 resources/koma-shutdown.target debian/koma/usr/lib/systemd/user/koma-shutdown.target
 	install -Dm644 resources/koma-portals.conf debian/koma/usr/share/xdg-desktop-portal/koma-portals.conf
+	install -Dm644 resources/koma.portal debian/koma/usr/share/xdg-desktop-portal/portals/koma.portal
+	install -Dm644 resources/org.freedesktop.impl.portal.desktop.koma.service debian/koma/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.koma.service
+	install -Dm644 resources/xdg-desktop-portal-koma.service debian/koma/usr/lib/systemd/user/xdg-desktop-portal-koma.service
 	install -Dm644 resources/greetd-config.toml debian/koma/usr/share/doc/koma/examples/greetd-config.toml
 	install -Dm644 examples/init.lua debian/koma/usr/share/doc/koma/examples/init.lua
 	install -Dm644 LICENSE debian/koma/usr/share/doc/koma/LICENSE

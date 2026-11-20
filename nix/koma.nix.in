@@ -10,6 +10,7 @@
   libgbm,
   libinput,
   libxkbcommon,
+  pipewire,
   seatd,
   systemd,
   wayland,
@@ -38,6 +39,8 @@ rustPlatform.buildRustPackage {
     "komactl"
     "-p"
     "koma-overview"
+    "-p"
+    "koma-portal"
   ];
 
   cargoTestFlags = [
@@ -57,6 +60,7 @@ rustPlatform.buildRustPackage {
     libgbm
     libinput
     libxkbcommon
+    pipewire
     seatd
     systemd
     wayland
@@ -79,6 +83,10 @@ rustPlatform.buildRustPackage {
     patchShebangs resources/koma-session
     substituteInPlace resources/koma.service \
       --replace-fail 'ExecStart=koma' "ExecStart=$out/bin/koma"
+    substituteInPlace resources/xdg-desktop-portal-koma.service \
+      --replace-fail '/usr/bin/xdg-desktop-portal-koma' "$out/bin/xdg-desktop-portal-koma"
+    substituteInPlace resources/org.freedesktop.impl.portal.desktop.koma.service \
+      --replace-fail '/usr/bin/xdg-desktop-portal-koma' "$out/bin/xdg-desktop-portal-koma"
   '';
 
   postInstall = ''
@@ -87,6 +95,9 @@ rustPlatform.buildRustPackage {
     install -Dm644 resources/koma.service "$out/lib/systemd/user/koma.service"
     install -Dm644 resources/koma-shutdown.target "$out/lib/systemd/user/koma-shutdown.target"
     install -Dm644 resources/koma-portals.conf "$out/share/xdg-desktop-portal/koma-portals.conf"
+    install -Dm644 resources/koma.portal "$out/share/xdg-desktop-portal/portals/koma.portal"
+    install -Dm644 resources/org.freedesktop.impl.portal.desktop.koma.service "$out/share/dbus-1/services/org.freedesktop.impl.portal.desktop.koma.service"
+    install -Dm644 resources/xdg-desktop-portal-koma.service "$out/lib/systemd/user/xdg-desktop-portal-koma.service"
     install -Dm644 resources/greetd-config.toml "$out/share/doc/koma/examples/greetd-config.toml"
     install -Dm644 examples/init.lua "$out/share/doc/koma/examples/init.lua"
     install -Dm644 LICENSE "$out/share/licenses/koma/LICENSE"

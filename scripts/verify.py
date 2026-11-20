@@ -22,6 +22,7 @@ ALLOWED_PLACEHOLDERS = {"@VERSION@", "@SOURCE_COMMIT@", "@SOURCE_SHA256@"}
 DUMMY_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 DUMMY_SHA256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 EXPECTED_BINARIES = ["koma", "komactl", "koma-overview"]
+EXPECTED_LINUX_BINARIES = ["koma", "komactl", "koma-overview", "xdg-desktop-portal-koma"]
 # `koma-mcp` was folded into the `koma mcp` subcommand; a leftover standalone
 # binary entry in any template, plist, or nFPM spec must fail loudly.
 REMOVED_BINARIES = ("koma-mcp",)
@@ -228,8 +229,9 @@ def verify_distro_metadata(root: Path, config: dict, distro: str) -> list[Path]:
         raise SystemExit(f"[{distro}] must require a full-40-character-commit")
     if section.get("source_checksum_required") != "sha256":
         raise SystemExit(f"[{distro}] must require sha256 source verification")
-    if section.get("packaged_binaries") != EXPECTED_BINARIES:
-        raise SystemExit(f"[{distro}] packaged_binaries must match {EXPECTED_BINARIES}")
+    expected_bins = EXPECTED_BINARIES if distro in {"freebsd", "openbsd"} else EXPECTED_LINUX_BINARIES
+    if section.get("packaged_binaries") != expected_bins:
+        raise SystemExit(f"[{distro}] packaged_binaries must match {expected_bins}")
 
     spec = DISTRO_TEMPLATES[distro]
     expected_templates = [rel for rel, _, _ in spec.templates]

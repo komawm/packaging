@@ -28,7 +28,7 @@ jiku_template = "archlinux/PKGBUILD.jiku.in"
 koma_bin_template = "archlinux/PKGBUILD.koma-bin.in"
 jiku_bin_template = "archlinux/PKGBUILD.jiku-bin.in"
 architectures = ["x86_64", "aarch64"]
-packaged_binaries = ["koma", "komactl", "koma-overview"]
+packaged_binaries = ["koma", "komactl", "koma-overview", "xdg-desktop-portal-koma"]
 jiku_packaged_binaries = ["jikud", "jiku"]
 
 [nfpm]
@@ -45,7 +45,7 @@ source_checksum_required = "sha256"
 templates = ["debian/changelog.in", "debian/control.in", "debian/rules.in"]
 static_files = ["debian/copyright", "debian/source/format"]
 architectures = ["amd64", "arm64"]
-packaged_binaries = ["koma", "komactl", "koma-overview"]
+packaged_binaries = ["koma", "komactl", "koma-overview", "xdg-desktop-portal-koma"]
 
 [rpm]
 status = "template-unaccepted"
@@ -54,7 +54,7 @@ source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 template = "rpm/koma.spec.in"
 architectures = ["x86_64", "aarch64"]
-packaged_binaries = ["koma", "komactl", "koma-overview"]
+packaged_binaries = ["koma", "komactl", "koma-overview", "xdg-desktop-portal-koma"]
 
 [alpine]
 status = "template-unaccepted"
@@ -63,7 +63,7 @@ source_revision_required = "full-40-character-commit"
 source_checksum_required = "sha256"
 template = "alpine/APKBUILD.in"
 architectures = ["x86_64", "aarch64"]
-packaged_binaries = ["koma", "komactl", "koma-overview"]
+packaged_binaries = ["koma", "komactl", "koma-overview", "xdg-desktop-portal-koma"]
 
 [nix]
 status = "template-unaccepted"
@@ -73,7 +73,7 @@ source_checksum_required = "sha256"
 templates = ["nix/koma.nix.in", "nix/flake.nix.in"]
 upstream_flake_present = false
 architectures = ["x86_64-linux", "aarch64-linux"]
-packaged_binaries = ["koma", "komactl", "koma-overview"]
+packaged_binaries = ["koma", "komactl", "koma-overview", "xdg-desktop-portal-koma"]
 
 [freebsd]
 status = "template-unaccepted-experimental"
@@ -109,7 +109,7 @@ template = "homebrew/koma.rb.in"
 koma_bin_template = "homebrew/koma-bin.rb.in"
 jiku_bin_template = "homebrew/jiku-bin.rb.in"
 architectures = ["x86_64", "aarch64"]
-packaged_binaries = ["koma", "komactl", "koma-overview"]
+packaged_binaries = ["koma", "komactl", "koma-overview", "xdg-desktop-portal-koma"]
 
 [development_prerelease]
 version = "0.0.2"

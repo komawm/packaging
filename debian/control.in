@@ -16,7 +16,9 @@ Build-Depends:
  libwayland-dev,
  libxkbcommon-dev,
  libdbus-1-dev,
- libfontconfig-dev | libfontconfig1-dev
+ libfontconfig-dev | libfontconfig1-dev,
+ libpipewire-0.3-dev,
+ libclang-dev
 Standards-Version: 4.7.0
 Homepage: https://github.com/komawm/koma
 Vcs-Git: https://github.com/komawm/koma.git

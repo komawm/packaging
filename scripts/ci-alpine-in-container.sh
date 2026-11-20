@@ -9,7 +9,7 @@ set -eu
 apk add --no-cache \
     abuild build-base sudo git rust cargo pkgconf eudev-dev libinput-dev \
     seatd-dev mesa-dev libdrm-dev wayland-dev libxkbcommon-dev dbus-dev \
-    fontconfig-dev
+    fontconfig-dev pipewire-dev clang-dev
 
 adduser -D -G abuild builder
 mkdir -p /etc/sudoers.d
